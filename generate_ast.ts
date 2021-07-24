@@ -53,3 +53,16 @@ defineAst("Expr", [
   // "Variable | name: Token",
 ]);
 console.log(`}`);
+console.log(`\nexport module stmt {
+  type Expr = expr.Expr;`);
+defineAst("Stmt", [
+  "Expression | expression: Expr",
+  "Print      | expression: Expr",
+  // "Assign   | name: Token, value: Expr",
+  // "Binary   | left: Expr, operator: Token, right: Expr",
+  // "Grouping | expression: Expr",
+  // "Literal  | value: any",
+  // "Unary    | operator: Token, right: Expr",
+  // "Variable | name: Token",
+]);
+console.log(`}`);

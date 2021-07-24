@@ -1,7 +1,8 @@
 import { readLines } from "https://deno.land/std@0.102.0/io/bufio.ts";
-import { expr } from "./ast.ts";
+import { expr, stmt } from "./ast.ts";
 
 type Expr = expr.Expr;
+type Stmt = stmt.Stmt;
 
 export enum TokenType {
   // Single-character tokens.
@@ -83,12 +84,33 @@ class Parser {
     this.tokens = tokens;
   }
 
-  parse(): Expr {
-    return this.expression();
+  parse(): Stmt[] {
+    const statements: Stmt[] = [];
+    while (!this.isAtEnd()) {
+      statements.push(this.statement());
+    }
+    return statements;
   }
 
   private expression(): Expr {
     return this.equality();
+  }
+
+  private statement(): Stmt {
+    if (this.match(TT.PRINT)) return this.printStatement();
+    return this.expressionStatement();
+  }
+
+  private printStatement(): Stmt {
+    const value = this.expression();
+    this.consume(TT.SEMICOLON, "Expect ';' after value.");
+    return new stmt.Print(value);
+  }
+
+  private expressionStatement(): Stmt {
+    const exp = this.expression();
+    this.consume(TT.SEMICOLON, "Expect ';' after expression.");
+    return new stmt.Expression(exp);
   }
 
   private equality(): Expr {
@@ -212,20 +234,46 @@ class RuntimeError extends Error {
   }
 }
 
-class Interpreter implements expr.Visitor<any> {
-  interpret(expression: Expr) {
+class Interpreter implements expr.Visitor<any>, stmt.Visitor<void> {
+  interpret(statements: Stmt[]) {
     try {
-      const val = this.evaluate(expression);
-      console.log(val);
+      for (const statement of statements) {
+        this.execute(statement);
+      }
     } catch (err) {
       if (err instanceof RuntimeError) {
         Lox.runtimeError(err);
+      } else {
+        throw err;
       }
     }
   }
+  // interpret(expression: Expr) {
+  //   try {
+  //     const val = this.evaluate(expression);
+  //     console.log(val);
+  //   } catch (err) {
+  //     if (err instanceof RuntimeError) {
+  //       Lox.runtimeError(err);
+  //     }
+  //   }
+  // }
 
   private evaluate(exp: Expr): any {
     return exp.accept(this);
+  }
+
+  private execute(stm: Stmt) {
+    stm.accept(this);
+  }
+
+  visitExpressionStmt(stm: stmt.Expression) {
+    this.evaluate(stm.expression);
+  }
+
+  visitPrintStmt(stm: stmt.Print) {
+    const value = this.evaluate(stm.expression);
+    Deno.stdout.write(ENC.encode(this.stringify(value) + "\n"));
   }
 
   visitLiteralExpr(exp: expr.Literal): any {
@@ -317,6 +365,14 @@ class Interpreter implements expr.Visitor<any> {
     if (null == a && null == b) return true;
     if (null == a) return false;
     return a === b;
+  }
+
+  private stringify(object: any) {
+    if (null === object) return "nil";
+    if (typeof object === "number") {
+      return JSON.stringify(object);
+    }
+    return JSON.stringify(object);
   }
 }
 
@@ -589,16 +645,10 @@ function run(source: string) {
 
   if (Lox.hadError) return;
 
-  // const interpreter = new Interpreter();
   Lox.interpreter.interpret(exp);
-
-  // exp.accept(new Printer());
-  // console.log(tokens.map((t) => t.toString()));
 }
 
 async function runFile(file: string) {
-  console.log(file);
-
   const contents = await Deno.readTextFile(file);
   run(contents);
 
@@ -610,6 +660,7 @@ async function runPrompt() {
   Deno.stdout.write(ENC.encode("> "));
   for await (const line of readLines(Deno.stdin)) {
     console.log(line);
+    Lox.hadError = false;
 
     Deno.stdout.write(ENC.encode("> "));
   }

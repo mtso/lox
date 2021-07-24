@@ -63,3 +63,36 @@ export module expr {
     }
   }
 }
+
+export module stmt {
+  type Expr = expr.Expr;
+  export abstract class Stmt {
+    abstract accept<T>(visitor: Visitor<T>): T;
+  }
+  export type Visitor<T> = {
+    visitExpressionStmt: (exp: Expression) => T;
+    visitPrintStmt: (exp: Print) => T;
+  };
+  export class Expression extends Stmt {
+    expression: Expr;
+
+    constructor(expression: Expr) {
+      super();
+      this.expression = expression;
+    }
+    accept<T>(visitor: Visitor<T>): T {
+      return visitor.visitExpressionStmt(this);
+    }
+  }
+  export class Print extends Stmt {
+    expression: Expr;
+
+    constructor(expression: Expr) {
+      super();
+      this.expression = expression;
+    }
+    accept<T>(visitor: Visitor<T>): T {
+      return visitor.visitPrintStmt(this);
+    }
+  }
+}
