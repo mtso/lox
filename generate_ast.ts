@@ -4,7 +4,7 @@ const defineVisitor = (baseName: string, types: string[]) => {
   console.log(`  export type Visitor<T> = {`);
   for (const typ of types) {
     const className = typ.split("|")[0].trim();
-    console.log(`    visit${className}: (exp: ${className}) => T;`);
+    console.log(`    visit${className}${baseName}: (exp: ${className}) => T;`);
   }
   console.log(`  };`);
 };
@@ -22,7 +22,7 @@ const defineType = (baseName: string, className: string, fields: string[]) => {
   }
   console.log(`    }`);
   console.log(`    accept<T>(visitor: Visitor<T>): T {
-      return visitor.visit${className}(this);
+      return visitor.visit${className}${baseName}(this);
     }`);
   console.log(`  }`);
 };

@@ -7,10 +7,10 @@ export module expr {
     abstract accept<T>(visitor: Visitor<T>): T;
   }
   export type Visitor<T> = {
-    visitBinary: (exp: Binary) => T;
-    visitGrouping: (exp: Grouping) => T;
-    visitLiteral: (exp: Literal) => T;
-    visitUnary: (exp: Unary) => T;
+    visitBinaryExpr: (exp: Binary) => T;
+    visitGroupingExpr: (exp: Grouping) => T;
+    visitLiteralExpr: (exp: Literal) => T;
+    visitUnaryExpr: (exp: Unary) => T;
   };
   export class Binary extends Expr {
     left: Expr;
@@ -24,7 +24,7 @@ export module expr {
       this.right = right;
     }
     accept<T>(visitor: Visitor<T>): T {
-      return visitor.visitBinary(this);
+      return visitor.visitBinaryExpr(this);
     }
   }
   export class Grouping extends Expr {
@@ -35,7 +35,7 @@ export module expr {
       this.expression = expression;
     }
     accept<T>(visitor: Visitor<T>): T {
-      return visitor.visitGrouping(this);
+      return visitor.visitGroupingExpr(this);
     }
   }
   export class Literal extends Expr {
@@ -46,7 +46,7 @@ export module expr {
       this.value = value;
     }
     accept<T>(visitor: Visitor<T>): T {
-      return visitor.visitLiteral(this);
+      return visitor.visitLiteralExpr(this);
     }
   }
   export class Unary extends Expr {
@@ -59,7 +59,7 @@ export module expr {
       this.right = right;
     }
     accept<T>(visitor: Visitor<T>): T {
-      return visitor.visitUnary(this);
+      return visitor.visitUnaryExpr(this);
     }
   }
 }

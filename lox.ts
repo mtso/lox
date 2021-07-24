@@ -1,6 +1,8 @@
 import { readLines } from "https://deno.land/std@0.102.0/io/bufio.ts";
 import { expr } from "./ast.ts";
 
+type Expr = expr.Expr;
+
 export enum TokenType {
   // Single-character tokens.
   LEFT_PAREN,
@@ -71,12 +73,260 @@ export class Token {
   }
 }
 
+class ParseError extends Error {}
+
+class Parser {
+  tokens: Token[];
+  private current: number = 0;
+
+  constructor(tokens: Token[]) {
+    this.tokens = tokens;
+  }
+
+  parse(): Expr {
+    return this.expression();
+  }
+
+  private expression(): Expr {
+    return this.equality();
+  }
+
+  private equality(): Expr {
+    let exp = this.comparison();
+
+    while (this.match(TT.BANG_EQUAL, TT.EQUAL_EQUAL)) {
+      const operator = this.previous();
+      const right = this.comparison();
+      exp = new expr.Binary(exp, operator, right);
+    }
+
+    return exp;
+  }
+
+  private comparison(): Expr {
+    let exp = this.term();
+    while (this.match(TT.GREATER, TT.GREATER_EQUAL, TT.LESS, TT.LESS_EQUAL)) {
+      const op = this.previous();
+      const right = this.term();
+      exp = new expr.Binary(exp, op, right);
+    }
+    return exp;
+  }
+
+  private term(): Expr {
+    let exp = this.factor();
+    while (this.match(TT.MINUS, TT.PLUS)) {
+      const op = this.previous();
+      const right = this.factor();
+      exp = new expr.Binary(exp, op, right);
+    }
+    return exp;
+  }
+
+  private factor(): Expr {
+    let exp = this.unary();
+    while (this.match(TT.SLASH, TT.STAR)) {
+      const op = this.previous();
+      const right = this.unary();
+      exp = new expr.Binary(exp, op, right);
+    }
+    return exp;
+  }
+
+  private unary(): Expr {
+    if (this.match(TT.BANG, TT.MINUS)) {
+      const op = this.previous();
+      const right = this.unary();
+      return new expr.Unary(op, right);
+    }
+    return this.primary();
+  }
+
+  private primary(): Expr {
+    if (this.match(TT.FALSE)) return new expr.Literal(false);
+    if (this.match(TT.TRUE)) return new expr.Literal(true);
+    if (this.match(TT.NIL)) return new expr.Literal(null);
+
+    if (this.match(TT.NUMBER, TT.STRING)) {
+      return new expr.Literal(this.previous().literal);
+    }
+
+    if (this.match(TT.LEFT_PAREN)) {
+      const exp = this.expression();
+      this.consume(TT.RIGHT_PAREN, "Expect ')' after expression.");
+      return new expr.Grouping(exp);
+    }
+
+    throw new ParseError();
+  }
+
+  private match(...types: TokenType[]): boolean {
+    for (const typ of types) {
+      if (this.check(typ)) {
+        this.advance();
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private consume(typ: TokenType, message: string): Token {
+    if (this.check(typ)) return this.advance();
+    throw this.error(this.peek(), message);
+  }
+
+  private check(typ: TokenType): boolean {
+    if (this.isAtEnd()) return false;
+    return this.peek().typ == typ;
+  }
+
+  private advance(): Token {
+    if (!this.isAtEnd()) this.current++;
+    return this.previous();
+  }
+
+  private isAtEnd(): boolean {
+    return this.peek().typ == TT.EOF;
+  }
+
+  private peek(): Token {
+    return this.tokens[this.current];
+  }
+
+  private previous(): Token {
+    return this.tokens[this.current - 1];
+  }
+
+  private error(token: Token, message: string): ParseError {
+    Lox.errorToken(token, message);
+    return new ParseError();
+  }
+}
+
+class RuntimeError extends Error {
+  token: Token;
+
+  constructor(token: Token, message: string) {
+    super(message);
+    this.token = token;
+  }
+}
+
+class Interpreter implements expr.Visitor<any> {
+  interpret(expression: Expr) {
+    try {
+      const val = this.evaluate(expression);
+      console.log(val);
+    } catch (err) {
+      if (err instanceof RuntimeError) {
+        Lox.runtimeError(err);
+      }
+    }
+  }
+
+  private evaluate(exp: Expr): any {
+    return exp.accept(this);
+  }
+
+  visitLiteralExpr(exp: expr.Literal): any {
+    return exp.value;
+  }
+
+  visitBinaryExpr(exp: expr.Binary): any {
+    const left = this.evaluate(exp.left);
+    const right = this.evaluate(exp.right);
+    switch (exp.operator.typ) {
+      case TT.BANG_EQUAL:
+        return !this.isEqual(left, right);
+      case TT.EQUAL_EQUAL:
+        return this.isEqual(left, right);
+      case TT.GREATER:
+        this.checkNumberOperands(exp.operator, left, right);
+        return (left as number) > (right as number);
+      case TT.GREATER_EQUAL:
+        this.checkNumberOperands(exp.operator, left, right);
+        return (left as number) >= (right as number);
+      case TT.LESS:
+        this.checkNumberOperands(exp.operator, left, right);
+        return (left as number) < (right as number);
+      case TT.LESS_EQUAL:
+        this.checkNumberOperands(exp.operator, left, right);
+        return (left as number) <= (right as number);
+      case TT.MINUS:
+        this.checkNumberOperands(exp.operator, left, right);
+        return (left as number) - (right as number);
+      case TT.PLUS:
+        if (typeof left === "number" && typeof right === "number") {
+          // if (left instanceof Number && right instanceof Number) {
+          return (left as number) + (right as number);
+        }
+        if (typeof left === "string" && typeof right === "string") {
+          return (left as string) + (right as string);
+        }
+        throw new RuntimeError(
+          exp.operator,
+          "Operands must be two numbers or two strings.",
+        );
+      case TT.SLASH:
+        this.checkNumberOperands(exp.operator, left, right);
+        return (left as number) / (right as number);
+      case TT.STAR:
+        this.checkNumberOperands(exp.operator, left, right);
+        return (left as number) * (right as number);
+    }
+    // Unrecahable.
+    return null;
+  }
+
+  visitGroupingExpr(exp: expr.Grouping): any {
+    return this.evaluate(exp.expression);
+  }
+
+  visitUnaryExpr(exp: expr.Unary): any {
+    const right = this.evaluate(exp.right);
+    switch (exp.operator.typ) {
+      case TT.BANG:
+        return !this.isTruthy(right);
+      case TT.MINUS:
+        this.checkNumberOperand(exp.operator, right);
+        return -(right as number);
+    }
+    return null;
+  }
+
+  private checkNumberOperand(op: Token, operand: any) {
+    if (typeof operand === "number") return;
+    throw new RuntimeError(op, "Operand must be a number.");
+  }
+
+  private checkNumberOperands(op: Token, left: any, right: any) {
+    // if (!isNaN(left) instanceof Number && right instanceof Number) return;
+    if (typeof left === "number" && typeof right === "number") return;
+    throw new RuntimeError(op, "Operands must be numbers.");
+  }
+
+  private isTruthy(object: any): boolean {
+    if (null === object || undefined === object || false === object) {
+      return false;
+    }
+    if (object instanceof Boolean) return object as boolean;
+    return true;
+  }
+
+  private isEqual(a: any, b: any): boolean {
+    if (null == a && null == b) return true;
+    if (null == a) return false;
+    return a === b;
+  }
+}
+
 class Scanner {
   source: string;
   tokens: Token[] = [];
-  start: number = 0;
-  current: number = 0;
-  line: number = 1;
+  private start: number = 0;
+  private current: number = 0;
+  private line: number = 1;
+
   static keywords: { [keyword: string]: TokenType } = {
     "and": TT.AND,
     "class": TT.CLASS,
@@ -181,7 +431,7 @@ class Scanner {
         } else if (this.isAlpha(ch)) {
           this.identifier();
         } else {
-          err.error(this.line, "Unexpected character.");
+          Lox.error(this.line, "Unexpected character.");
         }
         break;
     }
@@ -219,7 +469,7 @@ class Scanner {
     }
 
     if (this.isAtEnd()) {
-      err.error(this.line, "Unterminated string.");
+      Lox.error(this.line, "Unterminated string.");
       return;
     }
 
@@ -280,8 +530,29 @@ class Scanner {
   }
 }
 
-module err {
+class Printer implements expr.Visitor<void> {
+  visitLiteralExpr(exp: expr.Literal) {
+    Deno.stdout.write(ENC.encode(`${exp.value} `));
+  }
+  visitBinaryExpr(exp: expr.Binary) {
+    Deno.stdout.write(ENC.encode(`(${exp.operator.lexeme.toString()} `));
+    exp.left.accept(this);
+    exp.right.accept(this);
+    Deno.stdout.write(ENC.encode(`)`));
+  }
+  visitGroupingExpr(exp: expr.Grouping) {
+    exp.expression.accept(this);
+  }
+  visitUnaryExpr(exp: expr.Unary) {
+    Deno.stdout.write(ENC.encode(exp.operator.toString()));
+    exp.right.accept(this);
+  }
+}
+
+module Lox {
+  export let interpreter: Interpreter = new Interpreter();
   export let hadError: boolean = false;
+  export let hadRuntimeError: boolean = false;
 
   export const report = (line: number, where: string, message: string) => {
     console.error(`[line ${line}] Error${where}: ${message}`);
@@ -291,24 +562,19 @@ module err {
   export const error = (line: number, message: string) => {
     report(line, "", message);
   };
-}
 
-class Printer implements expr.Visitor<void> {
-  visitLiteral(exp: expr.Literal) {
-    console.log(`<literal ${exp.value}>`);
-  }
-  visitBinary(exp: expr.Binary) {
-    exp.left.accept(this);
-    console.log(exp.operator.toString());
-    exp.right.accept(this);
-  }
-  visitGrouping(exp: expr.Grouping) {
-    exp.expression.accept(this);
-  }
-  visitUnary(exp: expr.Unary) {
-    console.log(exp.operator.toString());
-    exp.right.accept(this);
-  }
+  export const errorToken = (token: Token, message: string) => {
+    if (token.typ == TT.EOF) {
+      report(token.line, " at end", message);
+    } else {
+      report(token.line, ` at '${token.lexeme}'`, message);
+    }
+  };
+
+  export const runtimeError = (err: RuntimeError) => {
+    console.error(err.message + `\n[line ${err.token.line}]`);
+    hadRuntimeError = true;
+  };
 }
 
 const ENC = new TextEncoder();
@@ -316,7 +582,18 @@ const ENC = new TextEncoder();
 function run(source: string) {
   const scanner = new Scanner(source);
   const tokens = scanner.scanTokens();
-  console.log(tokens.map((t) => t.toString()));
+  if (Lox.hadError) return;
+
+  const parser = new Parser(tokens);
+  const exp = parser.parse();
+
+  if (Lox.hadError) return;
+
+  // const interpreter = new Interpreter();
+  Lox.interpreter.interpret(exp);
+
+  // exp.accept(new Printer());
+  // console.log(tokens.map((t) => t.toString()));
 }
 
 async function runFile(file: string) {
@@ -324,6 +601,9 @@ async function runFile(file: string) {
 
   const contents = await Deno.readTextFile(file);
   run(contents);
+
+  if (Lox.hadError) Deno.exit(65);
+  if (Lox.hadRuntimeError) Deno.exit(70);
 }
 
 async function runPrompt() {
@@ -346,7 +626,10 @@ async function runPrompt() {
     await runPrompt();
   }
 
-  const p = new Printer();
-  const l = new expr.Literal(5);
-  l.accept(p);
+  // const p = new Printer();
+  // const l = new expr.Literal(5);
+  // l.accept(p);
+  // const parser = new Parser([new Token(TT.STRING, "hi", "hi", 1)]);
+  // const exp = parser.parse();
+  // exp.accept(p);
 }
