@@ -9,6 +9,7 @@ export module expr {
   export type Visitor<T> = {
     visitAssignExpr: (exp: Assign) => T;
     visitBinaryExpr: (exp: Binary) => T;
+    visitCallExpr: (exp: Call) => T;
     visitGroupingExpr: (exp: Grouping) => T;
     visitLiteralExpr: (exp: Literal) => T;
     visitLogicalExpr: (exp: Logical) => T;
@@ -41,6 +42,21 @@ export module expr {
     }
     accept<T>(visitor: Visitor<T>): T {
       return visitor.visitBinaryExpr(this);
+    }
+  }
+  export class Call extends Expr {
+    callee: Expr;
+    paren: Token;
+    args: Expr[];
+
+    constructor(callee: Expr, paren: Token, args: Expr[]) {
+      super();
+      this.callee = callee;
+      this.paren = paren;
+      this.args = args;
+    }
+    accept<T>(visitor: Visitor<T>): T {
+      return visitor.visitCallExpr(this);
     }
   }
   export class Grouping extends Expr {
@@ -114,8 +130,10 @@ export module stmt {
   export type Visitor<T> = {
     visitBlockStmt: (exp: Block) => T;
     visitExpressionStmt: (exp: Expression) => T;
+    visitFunctionStmt: (exp: Function) => T;
     visitIfStmt: (exp: If) => T;
     visitPrintStmt: (exp: Print) => T;
+    visitReturnStmt: (exp: Return) => T;
     visitVarStmt: (exp: Var) => T;
     visitWhileStmt: (exp: While) => T;
   };
@@ -139,6 +157,21 @@ export module stmt {
     }
     accept<T>(visitor: Visitor<T>): T {
       return visitor.visitExpressionStmt(this);
+    }
+  }
+  export class Function extends Stmt {
+    name: Token;
+    parameters: Token[];
+    body: Stmt[];
+
+    constructor(name: Token, parameters: Token[], body: Stmt[]) {
+      super();
+      this.name = name;
+      this.parameters = parameters;
+      this.body = body;
+    }
+    accept<T>(visitor: Visitor<T>): T {
+      return visitor.visitFunctionStmt(this);
     }
   }
   export class If extends Stmt {
@@ -165,6 +198,19 @@ export module stmt {
     }
     accept<T>(visitor: Visitor<T>): T {
       return visitor.visitPrintStmt(this);
+    }
+  }
+  export class Return extends Stmt {
+    keyword: Token;
+    value: Expr | null;
+
+    constructor(keyword: Token, value: Expr | null) {
+      super();
+      this.keyword = keyword;
+      this.value = value;
+    }
+    accept<T>(visitor: Visitor<T>): T {
+      return visitor.visitReturnStmt(this);
     }
   }
   export class Var extends Stmt {

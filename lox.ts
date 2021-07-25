@@ -101,6 +101,7 @@ class Parser {
 
   private declaration(): Stmt | null {
     try {
+      if (this.match(TT.FUN)) return this.function("function");
       if (this.match(TT.VAR)) return this.varDeclaration();
       return this.statement();
     } catch (err) {
@@ -117,6 +118,7 @@ class Parser {
     if (this.match(TT.FOR)) return this.forStatement();
     if (this.match(TT.IF)) return this.ifStatement();
     if (this.match(TT.PRINT)) return this.printStatement();
+    if (this.match(TT.RETURN)) return this.returnStatement();
     if (this.match(TT.WHILE)) return this.whileStatement();
     if (this.match(TT.LEFT_BRACE)) return new stmt.Block(this.block());
     return this.expressionStatement();
@@ -172,6 +174,16 @@ class Parser {
     return new stmt.Print(value);
   }
 
+  private returnStatement(): Stmt {
+    const keyword = this.previous();
+    let value = null;
+    if (!this.check(TT.SEMICOLON)) {
+      value = this.expression();
+    }
+    this.consume(TT.SEMICOLON, "Expect ';' after return value.");
+    return new stmt.Return(keyword, value);
+  }
+
   private varDeclaration() {
     const name = this.consume(TT.IDENTIFIER, "Expect variable name.");
     let initializer = null;
@@ -194,6 +206,24 @@ class Parser {
     const exp = this.expression();
     this.consume(TT.SEMICOLON, "Expect ';' after expression.");
     return new stmt.Expression(exp);
+  }
+
+  private function(kind: string): stmt.Function {
+    const name = this.consume(TT.IDENTIFIER, `Expect ${kind} name.`);
+    this.consume(TT.LEFT_PAREN, `Expect '(' after ${kind} name.`);
+    const params: Token[] = [];
+    if (!this.check(TT.RIGHT_PAREN)) {
+      do {
+        if (params.length >= 255) {
+          this.error(this.peek(), "Can't have more than 255 parameters.");
+        }
+        params.push(this.consume(TT.IDENTIFIER, "Expect parameter name."));
+      } while (this.match(TT.COMMA));
+    }
+    this.consume(TT.RIGHT_PAREN, "Expect ')' after parameters.");
+    this.consume(TT.LEFT_BRACE, `Expect '{' before ${kind} body.`);
+    const body = this.block();
+    return new stmt.Function(name, params, body);
   }
 
   private block(): Stmt[] {
@@ -290,7 +320,33 @@ class Parser {
       const right = this.unary();
       return new expr.Unary(op, right);
     }
-    return this.primary();
+    return this.call();
+  }
+
+  private finishCall(callee: Expr): Expr {
+    const args: Expr[] = [];
+    if (!this.check(TT.RIGHT_PAREN)) {
+      do {
+        if (args.length >= 255) {
+          this.error(this.peek(), "Can't have more than 255 arguments.");
+        }
+        args.push(this.expression());
+      } while (this.match(TT.COMMA));
+    }
+    const paren = this.consume(TT.RIGHT_PAREN, "Expect ')' after arguments.");
+    return new expr.Call(callee, paren, args);
+  }
+
+  private call(): Expr {
+    let exp = this.primary();
+    while (true) {
+      if (this.match(TT.LEFT_PAREN)) {
+        exp = this.finishCall(exp);
+      } else {
+        break;
+      }
+    }
+    return exp;
   }
 
   private primary(): Expr {
@@ -422,15 +478,79 @@ class Environment {
 
 class RuntimeError extends Error {
   token: Token;
-
   constructor(token: Token, message: string) {
     super(message);
     this.token = token;
   }
 }
 
+class Return extends Error {
+  value: any;
+  constructor(value: any) {
+    super();
+    this.value = value;
+  }
+}
+
+// type LoxCallable = {
+//   call: (interpreter: Interpreter, args: any[]) => any;
+// };
+abstract class LoxCallable {
+  abstract arity(): number;
+  abstract call(interpreter: Interpreter, args: any[]): any;
+}
+
+class LoxFunction extends LoxCallable {
+  private declaration: stmt.Function;
+  private closure: Environment;
+
+  constructor(declaration: stmt.Function, closure: Environment) {
+    super();
+    this.declaration = declaration;
+    this.closure = closure;
+  }
+  call(interpreter: Interpreter, args: any[]): any {
+    const environment = new Environment(this.closure);
+    for (let i = 0; i < this.declaration.parameters.length; i++) {
+      environment.define(this.declaration.parameters[i].lexeme, args[i]);
+    }
+    try {
+      interpreter.executeBlock(this.declaration.body, environment);
+    } catch (err) {
+      if (err instanceof Return) {
+        return (err as Return).value;
+      } else {
+        throw err;
+      }
+    }
+    return null;
+  }
+  arity(): number {
+    return this.declaration.parameters.length;
+  }
+  toString(): string {
+    return `<fn ${this.declaration.name.lexeme} >`;
+  }
+}
+
 class Interpreter implements expr.Visitor<any>, stmt.Visitor<void> {
+  globals: Environment = new Environment();
   private environment: Environment = new Environment();
+
+  constructor() {
+    class RtClock extends LoxCallable {
+      arity(): number {
+        return 0;
+      }
+      call(interpreter: Interpreter, args: any[]): any {
+        return Date.now() / 1000;
+      }
+      toString(): string {
+        return "<native fn clock>";
+      }
+    }
+    this.globals.define("clock", new RtClock());
+  }
 
   interpret(statements: Stmt[]) {
     try {
@@ -454,7 +574,7 @@ class Interpreter implements expr.Visitor<any>, stmt.Visitor<void> {
     stm.accept(this);
   }
 
-  private executeBlock(statements: Stmt[], environment: Environment) {
+  executeBlock(statements: Stmt[], environment: Environment) {
     const previous = this.environment;
     try {
       this.environment = environment;
@@ -474,6 +594,11 @@ class Interpreter implements expr.Visitor<any>, stmt.Visitor<void> {
     this.evaluate(stm.expression);
   }
 
+  visitFunctionStmt(stm: stmt.Function) {
+    const func = new LoxFunction(stm, this.environment);
+    this.environment.define(stm.name.lexeme, func);
+  }
+
   visitIfStmt(stm: stmt.If) {
     if (this.isTruthy(this.evaluate(stm.condition))) {
       this.execute(stm.thenBranch);
@@ -485,6 +610,12 @@ class Interpreter implements expr.Visitor<any>, stmt.Visitor<void> {
   visitPrintStmt(stm: stmt.Print) {
     const value = this.evaluate(stm.expression);
     Deno.stdout.write(ENC.encode(this.stringify(value) + "\n"));
+  }
+
+  visitReturnStmt(stm: stmt.Return) {
+    let value = null;
+    if (stm.value !== null) value = this.evaluate(stm.value);
+    throw new Return(value);
   }
 
   visitVarStmt(stm: stmt.Var) {
@@ -566,6 +697,25 @@ class Interpreter implements expr.Visitor<any>, stmt.Visitor<void> {
     }
     // Unreachable.
     return null;
+  }
+
+  visitCallExpr(exp: expr.Call): any {
+    const callee = this.evaluate(exp.callee);
+    const args: any[] = [];
+    for (const arg of exp.args) {
+      args.push(this.evaluate(arg));
+    }
+    if (!(callee instanceof LoxCallable)) {
+      throw new RuntimeError(exp.paren, "Can only call functions and classes.");
+    }
+    const func = callee as LoxCallable;
+    if (args.length !== func.arity()) {
+      throw new RuntimeError(
+        exp.paren,
+        `Expected ${func.arity()} arguments but got ${args.length}.`,
+      );
+    }
+    return func.call(this, args);
   }
 
   visitGroupingExpr(exp: expr.Grouping): any {
