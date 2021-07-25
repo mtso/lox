@@ -448,16 +448,28 @@ class Environment {
 
   define(name: string, value: any) {
     this.values.set(name, value);
-    // this.values[name] = value;
+  }
+
+  ancestor(distance: number): Environment {
+    let environment: Environment = this;
+    for (let i = 0; i < distance; i++) {
+      environment = environment.enclosing as Environment;
+    }
+    return environment;
+  }
+
+  getAt(distance: number, name: string) {
+    return this.ancestor(distance).values.get(name);
+  }
+
+  assignAt(distance: number, name: Token, value: any) {
+    this.ancestor(distance).values.set(name.lexeme, value);
   }
 
   get(name: Token): any {
     if (this.values.has(name.lexeme)) {
       return this.values.get(name.lexeme);
     }
-    // if (name.lexeme in this.values) {
-    //   return this.values[name.lexeme];
-    // }
     if (this.enclosing !== null) {
       return this.enclosing.get(name);
     }
@@ -492,9 +504,6 @@ class Return extends Error {
   }
 }
 
-// type LoxCallable = {
-//   call: (interpreter: Interpreter, args: any[]) => any;
-// };
 abstract class LoxCallable {
   abstract arity(): number;
   abstract call(interpreter: Interpreter, args: any[]): any;
@@ -533,9 +542,153 @@ class LoxFunction extends LoxCallable {
   }
 }
 
+enum FunctionType {
+  NONE,
+  FUNCTION,
+}
+
+class Resolver implements expr.Visitor<void>, stmt.Visitor<void> {
+  private interpreter: Interpreter;
+  private scopes: Map<string, boolean>[] = [];
+  private currentFunction: FunctionType = FunctionType.NONE;
+
+  constructor(interpreter: Interpreter) {
+    this.interpreter = interpreter;
+  }
+
+  resolveStmts(statements: Stmt[]) {
+    for (const statement of statements) {
+      this.resolveStmt(statement);
+    }
+  }
+  resolveStmt(stm: Stmt) {
+    stm.accept(this);
+  }
+  resolveExpr(exp: Expr) {
+    exp.accept(this);
+  }
+  resolveFunction(func: stmt.Function, typ: FunctionType) {
+    const enclosingFunction = this.currentFunction;
+    this.currentFunction = typ;
+    this.beginScope();
+    for (const param of func.parameters) {
+      this.declare(param);
+      this.define(param);
+    }
+    this.resolveStmts(func.body);
+    this.endScope();
+    this.currentFunction = enclosingFunction;
+  }
+
+  beginScope() {
+    this.scopes.push(new Map<string, boolean>());
+  }
+  endScope() {
+    this.scopes.pop();
+  }
+  declare(name: Token) {
+    if (this.scopes.length < 1) return;
+    const scope = this.scopes[this.scopes.length - 1];
+    if (scope.has(name.lexeme)) {
+      Lox.errorToken(name, "Already a variable with this name in this scope.");
+    }
+    scope.set(name.lexeme, false);
+  }
+  define(name: Token) {
+    if (this.scopes.length < 1) return;
+    const scope = this.scopes[this.scopes.length - 1];
+    scope.set(name.lexeme, true);
+  }
+  resolveLocal(exp: Expr, name: Token) {
+    for (let i = this.scopes.length - 1; i >= 0; i--) {
+      if (this.scopes[i].has(name.lexeme)) {
+        this.interpreter.resolve(exp, this.scopes.length - 1 - i);
+        return;
+      }
+    }
+  }
+
+  visitBlockStmt(stm: stmt.Block) {
+    this.beginScope();
+    this.resolveStmts(stm.statements);
+    this.endScope();
+  }
+  visitExpressionStmt(stm: stmt.Expression) {
+    this.resolveExpr(stm.expression);
+  }
+  visitFunctionStmt(stm: stmt.Function) {
+    this.declare(stm.name);
+    this.define(stm.name);
+    this.resolveFunction(stm, FunctionType.FUNCTION);
+  }
+  visitIfStmt(stm: stmt.If) {
+    this.resolveExpr(stm.condition);
+    this.resolveStmt(stm.thenBranch);
+    if (stm.elseBranch !== null) this.resolveStmt(stm.elseBranch);
+  }
+  visitPrintStmt(stm: stmt.Print) {
+    this.resolveExpr(stm.expression);
+  }
+  visitReturnStmt(stm: stmt.Return) {
+    if (this.currentFunction === FunctionType.NONE) {
+      Lox.errorToken(stm.keyword, "Can't return from. top-level code.");
+    }
+    if (stm.value !== null) this.resolveExpr(stm.value);
+  }
+  visitVarStmt(stm: stmt.Var) {
+    this.declare(stm.name);
+    if (stm.initializer !== null) {
+      this.resolveExpr(stm.initializer);
+    }
+    this.define(stm.name);
+  }
+  visitWhileStmt(stm: stmt.While) {
+    this.resolveExpr(stm.condition);
+    this.resolveStmt(stm.body);
+  }
+  visitAssignExpr(exp: expr.Assign) {
+    this.resolveExpr(exp.value);
+    this.resolveLocal(exp, exp.name);
+  }
+  visitBinaryExpr(exp: expr.Binary) {
+    this.resolveExpr(exp.left);
+    this.resolveExpr(exp.right);
+  }
+  visitCallExpr(exp: expr.Call) {
+    this.resolveExpr(exp.callee);
+    for (const arg of exp.args) {
+      this.resolveExpr(arg);
+    }
+  }
+  visitGroupingExpr(exp: expr.Grouping) {
+    this.resolveExpr(exp.expression);
+  }
+  visitLiteralExpr(exp: expr.Literal) {}
+  visitLogicalExpr(exp: expr.Logical) {
+    this.resolveExpr(exp.left);
+    this.resolveExpr(exp.right);
+  }
+  visitUnaryExpr(exp: expr.Unary) {
+    this.resolveExpr(exp.right);
+  }
+  visitVariableExpr(exp: expr.Variable) {
+    if (
+      !(this.scopes.length < 1) &&
+      (this.scopes[this.scopes.length - 1]).get(exp.name.lexeme) === false
+    ) {
+      Lox.errorToken(
+        exp.name,
+        "Can't read local variable in its own initializer.",
+      );
+    }
+    this.resolveLocal(exp, exp.name);
+  }
+}
+
 class Interpreter implements expr.Visitor<any>, stmt.Visitor<void> {
   globals: Environment = new Environment();
-  private environment: Environment = new Environment();
+  private environment: Environment = this.globals;
+  private locals: Map<Expr, number> = new Map<Expr, number>();
 
   constructor() {
     class RtClock extends LoxCallable {
@@ -572,6 +725,10 @@ class Interpreter implements expr.Visitor<any>, stmt.Visitor<void> {
 
   private execute(stm: Stmt) {
     stm.accept(this);
+  }
+
+  resolve(exp: Expr, depth: number) {
+    this.locals.set(exp, depth);
   }
 
   executeBlock(statements: Stmt[], environment: Environment) {
@@ -635,7 +792,12 @@ class Interpreter implements expr.Visitor<any>, stmt.Visitor<void> {
 
   visitAssignExpr(exp: expr.Assign): any {
     const value = this.evaluate(exp.value);
-    this.environment.assign(exp.name, value);
+    const distance = this.locals.get(exp);
+    if (distance !== null && distance !== undefined) {
+      this.environment.assignAt(distance, exp.name, value);
+    } else {
+      this.globals.assign(exp.name, value);
+    }
     return value;
   }
 
@@ -735,7 +897,17 @@ class Interpreter implements expr.Visitor<any>, stmt.Visitor<void> {
   }
 
   visitVariableExpr(exp: expr.Variable): any {
-    return this.environment.get(exp.name);
+    return this.lookupVariable(exp.name, exp);
+    // this.environment.get(exp.name);
+  }
+
+  private lookupVariable(name: Token, expr: Expr): any {
+    const distance = this.locals.get(expr);
+    if (distance !== null && distance !== undefined) {
+      return this.environment.getAt(distance, name.lexeme);
+    } else {
+      return this.globals.get(name);
+    }
   }
 
   private checkNumberOperand(op: Token, operand: any) {
@@ -1000,6 +1172,18 @@ class Printer implements expr.Visitor<void> {
     Deno.stdout.write(ENC.encode(exp.operator.toString()));
     exp.right.accept(this);
   }
+  visitAssignExpr(exp: expr.Assign) {
+    Deno.stdout.write(ENC.encode(`(assign ${exp.name.lexeme} `));
+    exp.value.accept(this);
+    Deno.stdout.write(ENC.encode(`)`));
+  }
+  visitCallExpr(exp: expr.Call) {
+  }
+  visitLogicalExpr(exp: expr.Logical) {
+  }
+  visitVariableExpr(exp: expr.Variable) {
+    Deno.stdout.write(ENC.encode(`(var ${exp.name.lexeme})`));
+  }
 }
 /**/
 
@@ -1039,11 +1223,16 @@ function run(source: string) {
   if (Lox.hadError) return;
 
   const parser = new Parser(tokens);
-  const exp = parser.parse();
+  const statements = parser.parse();
 
   if (Lox.hadError) return;
 
-  Lox.interpreter.interpret(exp);
+  const resolver = new Resolver(Lox.interpreter);
+  resolver.resolveStmts(statements);
+
+  if (Lox.hadError) return;
+
+  Lox.interpreter.interpret(statements);
 }
 
 async function runFile(file: string) {
@@ -1074,11 +1263,4 @@ async function runPrompt() {
   } else {
     await runPrompt();
   }
-
-  // const p = new Printer();
-  // const l = new expr.Literal(5);
-  // l.accept(p);
-  // const parser = new Parser([new Token(TT.STRING, "hi", "hi", 1)]);
-  // const exp = parser.parse();
-  // exp.accept(p);
 }
