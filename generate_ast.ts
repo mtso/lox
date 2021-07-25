@@ -3,7 +3,7 @@
 const defineVisitor = (baseName: string, types: string[]) => {
   console.log(`  export type Visitor<T> = {`);
   for (const typ of types) {
-    const className = typ.split("|")[0].trim();
+    const className = typ.split("=")[0].trim();
     console.log(`    visit${className}${baseName}: (exp: ${className}) => T;`);
   }
   console.log(`  };`);
@@ -35,34 +35,32 @@ const defineAst = (baseName: string, types: string[]) => {
   defineVisitor(baseName, types);
 
   for (const typ of types) {
-    const className = typ.split("|")[0].trim();
-    const fields = typ.split("|")[1].trim().split(", ");
+    const className = typ.split("=")[0].trim();
+    const fields = typ.split("=")[1].trim().split(", ");
     defineType(baseName, className, fields);
   }
 };
 
-console.log(`/* THIS FILE WAS GENERATED */\n`);
-console.log(`import { Token } from "./lox.ts";`);
-console.log(`\nexport module expr {`);
-defineAst("Expr", [
-  // "Assign   | name: Token, value: Expr",
-  "Binary   | left: Expr, operator: Token, right: Expr",
-  "Grouping | expression: Expr",
-  "Literal  | value: any",
-  "Unary    | operator: Token, right: Expr",
-  // "Variable | name: Token",
-]);
-console.log(`}`);
-console.log(`\nexport module stmt {
+{
+  console.log(`/* THIS FILE WAS GENERATED */\n`);
+  console.log(`import { Token } from "./lox.ts";`);
+  console.log(`\nexport module expr {`);
+  defineAst("Expr", [
+    "Assign   = name: Token, value: Expr",
+    "Binary   = left: Expr, operator: Token, right: Expr",
+    "Grouping = expression: Expr",
+    "Literal  = value: any",
+    "Unary    = operator: Token, right: Expr",
+    "Variable = name: Token",
+  ]);
+  console.log(`}`);
+  console.log(`\nexport module stmt {
   type Expr = expr.Expr;`);
-defineAst("Stmt", [
-  "Expression | expression: Expr",
-  "Print      | expression: Expr",
-  // "Assign   | name: Token, value: Expr",
-  // "Binary   | left: Expr, operator: Token, right: Expr",
-  // "Grouping | expression: Expr",
-  // "Literal  | value: any",
-  // "Unary    | operator: Token, right: Expr",
-  // "Variable | name: Token",
-]);
-console.log(`}`);
+  defineAst("Stmt", [
+    "Block      = statements: Stmt[]",
+    "Expression = expression: Expr",
+    "Print      = expression: Expr",
+    "Var        = name: Token, initializer: Expr | null",
+  ]);
+  console.log(`}`);
+}

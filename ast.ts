@@ -7,11 +7,26 @@ export module expr {
     abstract accept<T>(visitor: Visitor<T>): T;
   }
   export type Visitor<T> = {
+    visitAssignExpr: (exp: Assign) => T;
     visitBinaryExpr: (exp: Binary) => T;
     visitGroupingExpr: (exp: Grouping) => T;
     visitLiteralExpr: (exp: Literal) => T;
     visitUnaryExpr: (exp: Unary) => T;
+    visitVariableExpr: (exp: Variable) => T;
   };
+  export class Assign extends Expr {
+    name: Token;
+    value: Expr;
+
+    constructor(name: Token, value: Expr) {
+      super();
+      this.name = name;
+      this.value = value;
+    }
+    accept<T>(visitor: Visitor<T>): T {
+      return visitor.visitAssignExpr(this);
+    }
+  }
   export class Binary extends Expr {
     left: Expr;
     operator: Token;
@@ -62,6 +77,17 @@ export module expr {
       return visitor.visitUnaryExpr(this);
     }
   }
+  export class Variable extends Expr {
+    name: Token;
+
+    constructor(name: Token) {
+      super();
+      this.name = name;
+    }
+    accept<T>(visitor: Visitor<T>): T {
+      return visitor.visitVariableExpr(this);
+    }
+  }
 }
 
 export module stmt {
@@ -70,9 +96,22 @@ export module stmt {
     abstract accept<T>(visitor: Visitor<T>): T;
   }
   export type Visitor<T> = {
+    visitBlockStmt: (exp: Block) => T;
     visitExpressionStmt: (exp: Expression) => T;
     visitPrintStmt: (exp: Print) => T;
+    visitVarStmt: (exp: Var) => T;
   };
+  export class Block extends Stmt {
+    statements: Stmt[];
+
+    constructor(statements: Stmt[]) {
+      super();
+      this.statements = statements;
+    }
+    accept<T>(visitor: Visitor<T>): T {
+      return visitor.visitBlockStmt(this);
+    }
+  }
   export class Expression extends Stmt {
     expression: Expr;
 
@@ -93,6 +132,19 @@ export module stmt {
     }
     accept<T>(visitor: Visitor<T>): T {
       return visitor.visitPrintStmt(this);
+    }
+  }
+  export class Var extends Stmt {
+    name: Token;
+    initializer: Expr | null;
+
+    constructor(name: Token, initializer: Expr | null) {
+      super();
+      this.name = name;
+      this.initializer = initializer;
+    }
+    accept<T>(visitor: Visitor<T>): T {
+      return visitor.visitVarStmt(this);
     }
   }
 }

@@ -87,17 +87,35 @@ class Parser {
   parse(): Stmt[] {
     const statements: Stmt[] = [];
     while (!this.isAtEnd()) {
-      statements.push(this.statement());
+      const decl = this.declaration();
+      if (decl) {
+        statements.push(decl);
+      }
     }
     return statements;
   }
 
   private expression(): Expr {
-    return this.equality();
+    return this.assignment();
+  }
+
+  private declaration(): Stmt | null {
+    try {
+      if (this.match(TT.VAR)) return this.varDeclaration();
+      return this.statement();
+    } catch (err) {
+      if (err instanceof ParseError) {
+        this.synchronize();
+        return null;
+      } else {
+        throw err;
+      }
+    }
   }
 
   private statement(): Stmt {
     if (this.match(TT.PRINT)) return this.printStatement();
+    if (this.match(TT.LEFT_BRACE)) return new stmt.Block(this.block());
     return this.expressionStatement();
   }
 
@@ -107,10 +125,46 @@ class Parser {
     return new stmt.Print(value);
   }
 
+  private varDeclaration() {
+    const name = this.consume(TT.IDENTIFIER, "Expect variable name.");
+    let initializer = null;
+    if (this.match(TT.EQUAL)) {
+      initializer = this.expression();
+    }
+    this.consume(TT.SEMICOLON, "Expect ';' after variable declaration.");
+    return new stmt.Var(name, initializer);
+  }
+
   private expressionStatement(): Stmt {
     const exp = this.expression();
     this.consume(TT.SEMICOLON, "Expect ';' after expression.");
     return new stmt.Expression(exp);
+  }
+
+  private block(): Stmt[] {
+    const statements = [];
+    while (!this.check(TT.RIGHT_BRACE) && !this.isAtEnd()) {
+      const decl = this.declaration();
+      if (decl) {
+        statements.push(decl);
+      }
+    }
+    this.consume(TT.RIGHT_BRACE, "Expect '}' after block.");
+    return statements;
+  }
+
+  private assignment(): Expr {
+    const exp = this.equality();
+    if (this.match(TT.EQUAL)) {
+      const equals = this.previous();
+      const value = this.assignment();
+      if (exp instanceof expr.Variable) {
+        const name = (exp as expr.Variable).name;
+        return new expr.Assign(name, value);
+      }
+      this.error(equals, "Invalid assignment target.");
+    }
+    return exp;
   }
 
   private equality(): Expr {
@@ -173,6 +227,10 @@ class Parser {
       return new expr.Literal(this.previous().literal);
     }
 
+    if (this.match(TT.IDENTIFIER)) {
+      return new expr.Variable(this.previous());
+    }
+
     if (this.match(TT.LEFT_PAREN)) {
       const exp = this.expression();
       this.consume(TT.RIGHT_PAREN, "Expect ')' after expression.");
@@ -223,6 +281,68 @@ class Parser {
     Lox.errorToken(token, message);
     return new ParseError();
   }
+
+  private synchronize() {
+    this.advance();
+    while (!this.isAtEnd()) {
+      if (this.previous().typ == TT.SEMICOLON) return;
+      switch (this.peek().typ) {
+        case TT.CLASS:
+        case TT.FUN:
+        case TT.VAR:
+        case TT.FOR:
+        case TT.IF:
+        case TT.WHILE:
+        case TT.PRINT:
+        case TT.RETURN:
+          return;
+      }
+      this.advance();
+    }
+  }
+}
+
+class Environment {
+  enclosing: Environment | null;
+  values: Map<string, any> = new Map<string, any>();
+  // values: { [name: string] : any } = {};
+
+  constructor(enclosing?: Environment) {
+    if (enclosing) {
+      this.enclosing = enclosing;
+    } else {
+      this.enclosing = null;
+    }
+  }
+
+  define(name: string, value: any) {
+    this.values.set(name, value);
+    // this.values[name] = value;
+  }
+
+  get(name: Token): any {
+    if (this.values.has(name.lexeme)) {
+      return this.values.get(name.lexeme);
+    }
+    // if (name.lexeme in this.values) {
+    //   return this.values[name.lexeme];
+    // }
+    if (this.enclosing !== null) {
+      return this.enclosing.get(name);
+    }
+    throw new RuntimeError(name, `Undefined variable '${name.lexeme}'.`);
+  }
+
+  assign(name: Token, value: any): any {
+    if (this.values.has(name.lexeme)) {
+      this.values.set(name.lexeme, value);
+      return;
+    }
+    if (this.enclosing !== null) {
+      return this.enclosing.assign(name, value);
+    }
+    throw new RuntimeError(name, `Undefined variable '${name.lexeme}'.`);
+  }
 }
 
 class RuntimeError extends Error {
@@ -235,6 +355,8 @@ class RuntimeError extends Error {
 }
 
 class Interpreter implements expr.Visitor<any>, stmt.Visitor<void> {
+  private environment: Environment = new Environment();
+
   interpret(statements: Stmt[]) {
     try {
       for (const statement of statements) {
@@ -248,16 +370,6 @@ class Interpreter implements expr.Visitor<any>, stmt.Visitor<void> {
       }
     }
   }
-  // interpret(expression: Expr) {
-  //   try {
-  //     const val = this.evaluate(expression);
-  //     console.log(val);
-  //   } catch (err) {
-  //     if (err instanceof RuntimeError) {
-  //       Lox.runtimeError(err);
-  //     }
-  //   }
-  // }
 
   private evaluate(exp: Expr): any {
     return exp.accept(this);
@@ -267,6 +379,22 @@ class Interpreter implements expr.Visitor<any>, stmt.Visitor<void> {
     stm.accept(this);
   }
 
+  private executeBlock(statements: Stmt[], environment: Environment) {
+    const previous = this.environment;
+    try {
+      this.environment = environment;
+      for (const statement of statements) {
+        this.execute(statement);
+      }
+    } finally {
+      this.environment = previous;
+    }
+  }
+
+  visitBlockStmt(stm: stmt.Block) {
+    this.executeBlock(stm.statements, new Environment(this.environment));
+  }
+
   visitExpressionStmt(stm: stmt.Expression) {
     this.evaluate(stm.expression);
   }
@@ -274,6 +402,21 @@ class Interpreter implements expr.Visitor<any>, stmt.Visitor<void> {
   visitPrintStmt(stm: stmt.Print) {
     const value = this.evaluate(stm.expression);
     Deno.stdout.write(ENC.encode(this.stringify(value) + "\n"));
+  }
+
+  visitVarStmt(stm: stmt.Var) {
+    let value = null;
+    if (stm.initializer != null) {
+      value = this.evaluate(stm.initializer);
+    }
+    this.environment.define(stm.name.lexeme, value);
+    return null;
+  }
+
+  visitAssignExpr(exp: expr.Assign): any {
+    const value = this.evaluate(exp.value);
+    this.environment.assign(exp.name, value);
+    return value;
   }
 
   visitLiteralExpr(exp: expr.Literal): any {
@@ -322,7 +465,7 @@ class Interpreter implements expr.Visitor<any>, stmt.Visitor<void> {
         this.checkNumberOperands(exp.operator, left, right);
         return (left as number) * (right as number);
     }
-    // Unrecahable.
+    // Unreachable.
     return null;
   }
 
@@ -340,6 +483,10 @@ class Interpreter implements expr.Visitor<any>, stmt.Visitor<void> {
         return -(right as number);
     }
     return null;
+  }
+
+  visitVariableExpr(exp: expr.Variable): any {
+    return this.environment.get(exp.name);
   }
 
   private checkNumberOperand(op: Token, operand: any) {
@@ -586,6 +733,7 @@ class Scanner {
   }
 }
 
+/*
 class Printer implements expr.Visitor<void> {
   visitLiteralExpr(exp: expr.Literal) {
     Deno.stdout.write(ENC.encode(`${exp.value} `));
@@ -604,6 +752,7 @@ class Printer implements expr.Visitor<void> {
     exp.right.accept(this);
   }
 }
+/**/
 
 module Lox {
   export let interpreter: Interpreter = new Interpreter();
