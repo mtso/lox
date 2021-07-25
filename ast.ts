@@ -11,6 +11,7 @@ export module expr {
     visitBinaryExpr: (exp: Binary) => T;
     visitGroupingExpr: (exp: Grouping) => T;
     visitLiteralExpr: (exp: Literal) => T;
+    visitLogicalExpr: (exp: Logical) => T;
     visitUnaryExpr: (exp: Unary) => T;
     visitVariableExpr: (exp: Variable) => T;
   };
@@ -64,6 +65,21 @@ export module expr {
       return visitor.visitLiteralExpr(this);
     }
   }
+  export class Logical extends Expr {
+    left: Expr;
+    operator: Token;
+    right: Expr;
+
+    constructor(left: Expr, operator: Token, right: Expr) {
+      super();
+      this.left = left;
+      this.operator = operator;
+      this.right = right;
+    }
+    accept<T>(visitor: Visitor<T>): T {
+      return visitor.visitLogicalExpr(this);
+    }
+  }
   export class Unary extends Expr {
     operator: Token;
     right: Expr;
@@ -98,6 +114,7 @@ export module stmt {
   export type Visitor<T> = {
     visitBlockStmt: (exp: Block) => T;
     visitExpressionStmt: (exp: Expression) => T;
+    visitIfStmt: (exp: If) => T;
     visitPrintStmt: (exp: Print) => T;
     visitVarStmt: (exp: Var) => T;
   };
@@ -121,6 +138,21 @@ export module stmt {
     }
     accept<T>(visitor: Visitor<T>): T {
       return visitor.visitExpressionStmt(this);
+    }
+  }
+  export class If extends Stmt {
+    condition: Expr;
+    thenBranch: Stmt;
+    elseBranch: Stmt | null;
+
+    constructor(condition: Expr, thenBranch: Stmt, elseBranch: Stmt | null) {
+      super();
+      this.condition = condition;
+      this.thenBranch = thenBranch;
+      this.elseBranch = elseBranch;
+    }
+    accept<T>(visitor: Visitor<T>): T {
+      return visitor.visitIfStmt(this);
     }
   }
   export class Print extends Stmt {

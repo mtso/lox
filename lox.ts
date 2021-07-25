@@ -114,9 +114,22 @@ class Parser {
   }
 
   private statement(): Stmt {
+    if (this.match(TT.IF)) return this.ifStatement();
     if (this.match(TT.PRINT)) return this.printStatement();
     if (this.match(TT.LEFT_BRACE)) return new stmt.Block(this.block());
     return this.expressionStatement();
+  }
+
+  private ifStatement(): Stmt {
+    this.consume(TT.LEFT_PAREN, "Expect '(' after 'if'.");
+    const condition = this.expression();
+    this.consume(TT.RIGHT_PAREN, "Expect ')' after if condition.");
+    const thenBranch = this.statement();
+    let elseBranch = null;
+    if (this.match(TT.ELSE)) {
+      elseBranch = this.statement();
+    }
+    return new stmt.If(condition, thenBranch, elseBranch);
   }
 
   private printStatement(): Stmt {
@@ -154,7 +167,7 @@ class Parser {
   }
 
   private assignment(): Expr {
-    const exp = this.equality();
+    const exp = this.or();
     if (this.match(TT.EQUAL)) {
       const equals = this.previous();
       const value = this.assignment();
@@ -163,6 +176,26 @@ class Parser {
         return new expr.Assign(name, value);
       }
       this.error(equals, "Invalid assignment target.");
+    }
+    return exp;
+  }
+
+  private or(): Expr {
+    let exp = this.and();
+    while (this.match(TT.OR)) {
+      const op = this.previous();
+      const right = this.and();
+      exp = new expr.Logical(exp, op, right);
+    }
+    return exp;
+  }
+
+  private and(): Expr {
+    let exp = this.equality();
+    while (this.match(TT.AND)) {
+      const op = this.previous();
+      const right = this.equality();
+      exp = new expr.Logical(exp, op, right);
     }
     return exp;
   }
@@ -399,6 +432,14 @@ class Interpreter implements expr.Visitor<any>, stmt.Visitor<void> {
     this.evaluate(stm.expression);
   }
 
+  visitIfStmt(stm: stmt.If) {
+    if (this.isTruthy(this.evaluate(stm.condition))) {
+      this.execute(stm.thenBranch);
+    } else if (stm.elseBranch !== null) {
+      this.execute(stm.elseBranch);
+    }
+  }
+
   visitPrintStmt(stm: stmt.Print) {
     const value = this.evaluate(stm.expression);
     Deno.stdout.write(ENC.encode(this.stringify(value) + "\n"));
@@ -421,6 +462,16 @@ class Interpreter implements expr.Visitor<any>, stmt.Visitor<void> {
 
   visitLiteralExpr(exp: expr.Literal): any {
     return exp.value;
+  }
+
+  visitLogicalExpr(exp: expr.Logical): any {
+    const left = this.evaluate(exp.left);
+    if (exp.operator.typ == TT.OR) {
+      if (this.isTruthy(left)) return left;
+    } else {
+      if (!this.isTruthy(left)) return left;
+    }
+    return this.evaluate(exp.right);
   }
 
   visitBinaryExpr(exp: expr.Binary): any {

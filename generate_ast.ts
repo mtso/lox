@@ -50,6 +50,7 @@ const defineAst = (baseName: string, types: string[]) => {
     "Binary   = left: Expr, operator: Token, right: Expr",
     "Grouping = expression: Expr",
     "Literal  = value: any",
+    "Logical  = left: Expr, operator: Token, right: Expr",
     "Unary    = operator: Token, right: Expr",
     "Variable = name: Token",
   ]);
@@ -59,6 +60,7 @@ const defineAst = (baseName: string, types: string[]) => {
   defineAst("Stmt", [
     "Block      = statements: Stmt[]",
     "Expression = expression: Expr",
+    "If         = condition: Expr, thenBranch: Stmt, elseBranch: Stmt | null",
     "Print      = expression: Expr",
     "Var        = name: Token, initializer: Expr | null",
   ]);
