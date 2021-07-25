@@ -117,6 +117,7 @@ export module stmt {
     visitIfStmt: (exp: If) => T;
     visitPrintStmt: (exp: Print) => T;
     visitVarStmt: (exp: Var) => T;
+    visitWhileStmt: (exp: While) => T;
   };
   export class Block extends Stmt {
     statements: Stmt[];
@@ -177,6 +178,19 @@ export module stmt {
     }
     accept<T>(visitor: Visitor<T>): T {
       return visitor.visitVarStmt(this);
+    }
+  }
+  export class While extends Stmt {
+    condition: Expr;
+    body: Stmt;
+
+    constructor(condition: Expr, body: Stmt) {
+      super();
+      this.condition = condition;
+      this.body = body;
+    }
+    accept<T>(visitor: Visitor<T>): T {
+      return visitor.visitWhileStmt(this);
     }
   }
 }

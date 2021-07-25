@@ -114,10 +114,44 @@ class Parser {
   }
 
   private statement(): Stmt {
+    if (this.match(TT.FOR)) return this.forStatement();
     if (this.match(TT.IF)) return this.ifStatement();
     if (this.match(TT.PRINT)) return this.printStatement();
+    if (this.match(TT.WHILE)) return this.whileStatement();
     if (this.match(TT.LEFT_BRACE)) return new stmt.Block(this.block());
     return this.expressionStatement();
+  }
+
+  private forStatement(): Stmt {
+    this.consume(TT.LEFT_PAREN, "Expect '(' after 'for'.");
+    let initializer;
+    if (this.match(TT.SEMICOLON)) {
+      initializer = null;
+    } else if (this.match(TT.VAR)) {
+      initializer = this.varDeclaration();
+    } else {
+      initializer = this.expressionStatement();
+    }
+    let condition = null;
+    if (!this.check(TT.SEMICOLON)) {
+      condition = this.expression();
+    }
+    this.consume(TT.SEMICOLON, "Expect ';' after loop condition.");
+    let increment = null;
+    if (!this.check(TT.RIGHT_PAREN)) {
+      increment = this.expression();
+    }
+    this.consume(TT.RIGHT_PAREN, "Expect ')' after for clauses.");
+    let body = this.statement();
+    if (increment !== null) {
+      body = new stmt.Block([body, new stmt.Expression(increment)]);
+    }
+    if (condition == null) condition = new expr.Literal(true);
+    body = new stmt.While(condition, body);
+    if (initializer !== null) {
+      body = new stmt.Block([initializer, body]);
+    }
+    return body;
   }
 
   private ifStatement(): Stmt {
@@ -146,6 +180,14 @@ class Parser {
     }
     this.consume(TT.SEMICOLON, "Expect ';' after variable declaration.");
     return new stmt.Var(name, initializer);
+  }
+
+  private whileStatement() {
+    this.consume(TT.LEFT_PAREN, "Expect '(' after 'while'.");
+    const condition = this.expression();
+    this.consume(TT.RIGHT_PAREN, "Expect ')' after condition.");
+    const body = this.statement();
+    return new stmt.While(condition, body);
   }
 
   private expressionStatement(): Stmt {
@@ -452,6 +494,12 @@ class Interpreter implements expr.Visitor<any>, stmt.Visitor<void> {
     }
     this.environment.define(stm.name.lexeme, value);
     return null;
+  }
+
+  visitWhileStmt(stm: stmt.While) {
+    while (this.isTruthy(this.evaluate(stm.condition))) {
+      this.execute(stm.body);
+    }
   }
 
   visitAssignExpr(exp: expr.Assign): any {
