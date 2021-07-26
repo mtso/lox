@@ -53,6 +53,7 @@ const defineAst = (baseName: string, types: string[]) => {
     "Get      = object: Expr, name: Token",
     "Set      = object: Expr, name: Token, value: Expr",
     "SetDyn   = object: Expr, dot: Token, name: Expr, value: Expr",
+    "Super    = keyword: Token, method: Token",
     "This     = keyword: Token",
     "Grouping = expression: Expr",
     "Literal  = value: any",
@@ -65,7 +66,7 @@ const defineAst = (baseName: string, types: string[]) => {
   type Expr = expr.Expr;`);
   defineAst("Stmt", [
     "Block      = statements: Stmt[]",
-    "Class      = name: Token, methods: Function[]",
+    "Class      = name: Token, superclass: expr.Variable | null, methods: Function[]",
     "Expression = expression: Expr",
     "Function   = name: Token, parameters: Token[], body: Stmt[]",
     "If         = condition: Expr, thenBranch: Stmt, elseBranch: Stmt | null",

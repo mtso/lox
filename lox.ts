@@ -117,13 +117,20 @@ class Parser {
 
   private classDeclaration(): Stmt {
     const name = this.consume(TT.IDENTIFIER, "Expect class name.");
+    let superclass = null;
+    if (this.match(TT.LESS)) {
+      this.consume(TT.IDENTIFIER, "Expect superclass name.");
+      superclass = new expr.Variable(this.previous());
+    }
+
     this.consume(TT.LEFT_BRACE, "Expect '{' before class body.");
+
     const methods: stmt.Function[] = [];
     while (!this.check(TT.RIGHT_BRACE) && !this.isAtEnd()) {
       methods.push(this.function("method"));
     }
     this.consume(TT.RIGHT_BRACE, "Expect '}' after class body.");
-    return new stmt.Class(name, methods);
+    return new stmt.Class(name, superclass, methods);
   }
 
   private statement(): Stmt {
@@ -399,6 +406,16 @@ class Parser {
       return new expr.Literal(this.previous().literal);
     }
 
+    if (this.match(TT.SUPER)) {
+      const keyword = this.previous();
+      this.consume(TT.DOT, "Expect '.' after 'super'.");
+      const method = this.consume(
+        TT.IDENTIFIER,
+        "Expect superclass method name.",
+      );
+      return new expr.Super(keyword, method);
+    }
+
     if (this.match(TT.THIS)) return new expr.This(this.previous());
 
     if (this.match(TT.IDENTIFIER)) {
@@ -551,6 +568,13 @@ abstract class LoxCallable {
   abstract call(interpreter: Interpreter, args: any[]): any;
 }
 
+enum FunctionType {
+  NONE,
+  FUNCTION,
+  INITIALIZER,
+  METHOD,
+}
+
 class LoxFunction extends LoxCallable {
   private declaration: stmt.Function;
   private closure: Environment;
@@ -599,24 +623,32 @@ class LoxFunction extends LoxCallable {
   }
 }
 
-enum FunctionType {
+enum ClassType {
   NONE,
-  FUNCTION,
-  INITIALIZER,
-  METHOD,
+  CLASS,
+  SUBCLASS,
 }
 
 class LoxClass extends LoxCallable {
   name: string;
   private methods: Map<string, LoxFunction>;
-  constructor(name: string, methods: Map<string, LoxFunction>) {
+  private superclass: LoxClass | null;
+  constructor(
+    name: string,
+    superclass: LoxClass | null,
+    methods: Map<string, LoxFunction>,
+  ) {
     super();
     this.name = name;
+    this.superclass = superclass;
     this.methods = methods;
   }
   findMethod(name: string): LoxFunction | null {
     if (this.methods.has(name)) {
       return this.methods.get(name) as LoxFunction;
+    }
+    if (null !== this.superclass) {
+      return this.superclass.findMethod(name) as LoxFunction;
     }
     return null;
   }
@@ -639,11 +671,6 @@ class LoxClass extends LoxCallable {
       return initializer.arity();
     }
   }
-}
-
-enum ClassType {
-  NONE,
-  CLASS,
 }
 
 class LoxInstance {
@@ -754,6 +781,20 @@ class Resolver implements expr.Visitor<void>, stmt.Visitor<void> {
     this.declare(stm.name);
     this.define(stm.name);
 
+    if (
+      null !== stm.superclass && stm.name.lexeme === stm.superclass.name.lexeme
+    ) {
+      Lox.errorToken(stm.superclass.name, "A class can't inherit from itself.");
+    }
+    if (null !== stm.superclass) {
+      this.currentClass = ClassType.SUBCLASS;
+      this.resolveExpr(stm.superclass);
+    }
+    if (null !== stm.superclass) {
+      this.beginScope();
+      this.scopes[this.scopes.length - 1].set("super", true);
+    }
+
     this.beginScope();
     this.scopes[this.scopes.length - 1].set("this", true);
     for (const method of stm.methods) {
@@ -764,6 +805,8 @@ class Resolver implements expr.Visitor<void>, stmt.Visitor<void> {
       this.resolveFunction(method, declaration);
     }
     this.endScope();
+
+    if (null !== stm.superclass) this.endScope();
 
     this.currentClass = enclosingClass;
   }
@@ -845,6 +888,17 @@ class Resolver implements expr.Visitor<void>, stmt.Visitor<void> {
     this.resolveExpr(exp.value);
     this.resolveExpr(exp.name);
     this.resolveExpr(exp.object);
+  }
+  visitSuperExpr(exp: expr.Super) {
+    if (this.currentClass === ClassType.NONE) {
+      Lox.errorToken(exp.keyword, "Can't use 'super' outside of a class.");
+    } else if (this.currentClass !== ClassType.SUBCLASS) {
+      Lox.errorToken(
+        exp.keyword,
+        "Can't use 'super' in a class with no superclass.",
+      );
+    }
+    this.resolveLocal(exp, exp.keyword);
   }
   visitThisExpr(exp: expr.This) {
     if (this.currentClass === ClassType.NONE) {
@@ -979,7 +1033,24 @@ class Interpreter implements expr.Visitor<any>, stmt.Visitor<void> {
   }
 
   visitClassStmt(stm: stmt.Class) {
+    let superclass = null;
+    if (null !== stm.superclass) {
+      superclass = this.evaluate(stm.superclass);
+      if (!(superclass instanceof LoxClass)) {
+        throw new RuntimeError(
+          stm.superclass.name,
+          "Superclass must be a class.",
+        );
+      }
+    }
+
     this.environment.define(stm.name.lexeme, null);
+
+    if (null !== superclass) {
+      this.environment = new Environment(this.environment);
+      this.environment.define("super", superclass);
+    }
+
     const methods = new Map<string, LoxFunction>();
     for (const method of stm.methods) {
       const func = new LoxFunction(
@@ -989,7 +1060,16 @@ class Interpreter implements expr.Visitor<any>, stmt.Visitor<void> {
       );
       methods.set(method.name.lexeme, func);
     }
-    const klass = new LoxClass(stm.name.lexeme, methods);
+    const klass = new LoxClass(
+      stm.name.lexeme,
+      superclass as LoxClass,
+      methods,
+    );
+
+    if (null !== superclass) {
+      this.environment = this.environment.enclosing as Environment;
+    }
+
     this.environment.assign(stm.name, klass);
   }
 
@@ -1167,6 +1247,20 @@ class Interpreter implements expr.Visitor<any>, stmt.Visitor<void> {
     (object as LoxInstance).setDyn(name, value, exp.dot);
   }
 
+  visitSuperExpr(exp: expr.Super): any {
+    const distance = this.locals.get(exp) as number;
+    const superclass = this.environment.getAt(distance, "super") as LoxClass;
+    const object = this.environment.getAt(distance - 1, "this") as LoxInstance;
+    const method = superclass.findMethod(exp.method.lexeme);
+    if (null === method) {
+      throw new RuntimeError(
+        exp.method,
+        `Undefined property '${exp.method.lexeme}'.`,
+      );
+    }
+    return method.bind(object);
+  }
+
   visitThisExpr(exp: expr.This): any {
     return this.lookupVariable(exp.keyword, exp);
   }
@@ -1225,6 +1319,10 @@ class Interpreter implements expr.Visitor<any>, stmt.Visitor<void> {
     if (null === object) return "nil";
     if (typeof object === "number") {
       return JSON.stringify(object);
+    }
+    if (typeof object === "string") {
+      const str = JSON.stringify(object);
+      return str.substring(1, str.length - 1);
     }
     return JSON.stringify(object);
   }

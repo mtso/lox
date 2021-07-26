@@ -21,3 +21,5 @@ for (var i = 0; i < 5; i = i + 1) {
 }
 var j = 5;
 while (j > 0) print j = j - 1;
+print 3.5;
+print 3.0;
