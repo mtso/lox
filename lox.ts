@@ -691,8 +691,8 @@ class LoxInstance {
     throw new RuntimeError(name, `Undefined property '${name.lexeme}'.`);
   }
   getDyn(name: string, where: Token): any {
-    if (this.fields.has(name)) {
-      return this.fields.get(name);
+    if (this.fields.has("" + name)) {
+      return this.fields.get("" + name);
     }
     const method = this.klass.findMethod(name);
     if (null !== method) return method.bind(this);
@@ -703,7 +703,7 @@ class LoxInstance {
     this.fields.set(name.lexeme, value);
   }
   setDyn(name: string, value: any, where: Token): any {
-    this.fields.set(name, value);
+    this.fields.set("" + name, value);
   }
 }
 
@@ -941,6 +941,24 @@ class Interpreter implements expr.Visitor<any>, stmt.Visitor<void> {
         return "<native fn>";
       }
     }
+    class RtStr extends LoxCallable {
+      arity(): number {
+        return 1;
+      }
+      call(interpreter: Interpreter, args: any[]): any {
+        return Interpreter.stringify(args[0]);
+      }
+    }
+    class RtParseFloat extends LoxCallable {
+      arity(): number {
+        return 1;
+      }
+      call(interpreter: Interpreter, args: any[]): any {
+        const v = Number.parseFloat(args[0]);
+        if (isNaN(v)) return null;
+        return v;
+      }
+    }
     class RtSubstr extends LoxCallable {
       arity(): number {
         return 3;
@@ -983,11 +1001,53 @@ class Interpreter implements expr.Visitor<any>, stmt.Visitor<void> {
         }
       }
     }
+    class RtProcessArgs extends LoxCallable {
+      arity(): number {
+        return 0;
+      }
+      call(interpreter: Interpreter, args: any[]): any {
+        // Assume the lox.ts script was run like:
+        // deno run --allow-read lox.ts lox.lox -- arg0 arg1 arg2
+        // Skip past lox.lox filename and "--" separator.
+        const runtimeArgs = Deno.args.slice(2);
+        const containerClass = new LoxClass(
+          "RtArgContainer",
+          null,
+          new Map<string, LoxFunction>(),
+        );
+        const container = new LoxInstance(containerClass);
+        for (let i = 0; i < runtimeArgs.length; i++) {
+          container.setDyn(
+            "" + i,
+            runtimeArgs[i],
+            new Token(TT.NUMBER, "" + i, i, 0),
+          );
+        }
+        container.set(
+          new Token(TT.STRING, "count", "count", 0),
+          runtimeArgs.length,
+        );
+        return container;
+      }
+    }
+    class RtProcessExit extends LoxCallable {
+      arity(): number {
+        return 1;
+      }
+      call(interpreter: Interpreter, args: any[]): any {
+        const code = args[0];
+        Deno.exit(code);
+      }
+    }
 
     this.globals.define("clock", new RtClock());
+    this.globals.define("str", new RtStr());
     this.globals.define("substr", new RtSubstr());
     this.globals.define("strlen", new RtStrlen());
     this.globals.define("readfile", new RtReadfile());
+    this.globals.define("parse_float", new RtParseFloat());
+    this.globals.define("process_args", new RtProcessArgs());
+    this.globals.define("process_exit", new RtProcessExit());
   }
 
   interpret(statements: Stmt[]) {
@@ -1096,7 +1156,7 @@ class Interpreter implements expr.Visitor<any>, stmt.Visitor<void> {
     // stdout.write returns a Promise that
     // a runtime error could interrupt.
     // console.log(this.stringify(value));
-    Deno.stdout.writeSync(ENC.encode(this.stringify(value) + "\n"));
+    Deno.stdout.writeSync(ENC.encode(Interpreter.stringify(value) + "\n"));
   }
 
   visitReturnStmt(stm: stmt.Return) {
@@ -1319,16 +1379,16 @@ class Interpreter implements expr.Visitor<any>, stmt.Visitor<void> {
     return a === b;
   }
 
-  private stringify(object: any) {
+  static stringify(object: any) {
     if (null === object) return "nil";
     if (typeof object === "number") {
       if (object === 0) {
-        const bytes = this.doubleToByteArray(object);
+        const bytes = Interpreter.doubleToByteArray(object);
         // Not really sure why this is expected...
-        if (bytes[0] === -128) return "-0"; 
+        if (bytes[0] === -128) return "-0";
       }
       return JSON.stringify(object);
-    } 
+    }
     if (typeof object === "string") {
       return object;
     }
@@ -1338,11 +1398,11 @@ class Interpreter implements expr.Visitor<any>, stmt.Visitor<void> {
     return JSON.stringify(object);
   }
 
-  private doubleToByteArray(num: number) {
-    const buffer = new ArrayBuffer(8);         // JS numbers are 8 bytes long, or 64 bits
-    const longNum = new Float64Array(buffer);  // so equivalent to Float64
+  private static doubleToByteArray(num: number) {
+    const buffer = new ArrayBuffer(8); // JS numbers are 8 bytes long, or 64 bits
+    const longNum = new Float64Array(buffer); // so equivalent to Float64
     longNum[0] = num;
-    return Array.from(new Int8Array(buffer)).reverse();  // reverse to get little endian
+    return Array.from(new Int8Array(buffer)).reverse(); // reverse to get little endian
   }
 }
 
@@ -1495,6 +1555,7 @@ class Scanner {
   private string() {
     while (this.peek() != '"' && !this.isAtEnd()) {
       if (this.peek() == "\n") this.line++;
+      if (this.peek() == "\\") this.advance();
       this.advance();
     }
 
@@ -1507,7 +1568,12 @@ class Scanner {
     this.advance();
 
     // Trim the surrounding quotes.
-    const value = this.source.substring(this.start + 1, this.current - 1);
+    let value = this.source.substring(this.start + 1, this.current - 1);
+    value = value.replaceAll("\\0", "\0");
+    value = value.replaceAll("\\r", "\r");
+    value = value.replaceAll("\\n", "\n");
+    value = value.replaceAll("\\t", "\t");
+    value = value.replaceAll(/\\(.)/g, "$1");
     this.addTokenLiteral(TT.STRING, value);
   }
 
@@ -1660,8 +1726,12 @@ async function runPrompt() {
 {
   const args = Deno.args;
   if (args.length > 1) {
-    console.log(`Usage: deno run --allow-read lox.ts [script]`);
-    Deno.exit(64);
+    if (args[1] === "--") {
+      await runFile(Deno.args[0]);
+    } else {
+      console.log(`Usage: deno run --allow-read lox.ts [script]`);
+      Deno.exit(64);
+    }
   } else if (args.length == 1) {
     await runFile(Deno.args[0]);
   } else {

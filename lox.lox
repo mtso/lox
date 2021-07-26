@@ -1,0 +1,309 @@
+class Object { }
+
+class List {
+  init() {
+    this._items = Object();
+    this._count = 0;
+  }
+  add(item) {
+    this._items.(this._count) = item;
+    this._count = this._count + 1;
+  }
+  get(i) { return this._items.(i); }
+  size() { return this._count; }
+}
+
+class Map {
+  init() {
+    this._items = Object();
+    this._count = 0;
+  }
+  set(key, value) {
+    if (this._items.(key) == nil and value != nil) this._count = this._count + 1;
+    if (this._items.(key) != nil and value == nil) this._count = this._count - 1;
+    this._items.(key) = value;
+  }
+  get(key) { return this._items.(key); }
+  size() { return this._count; }
+}
+
+class Result {
+  init(ok, value) {
+    this.ok = ok;
+    this.value = value;
+  }
+}
+
+class TokenType {
+  init() {
+    this.LEFT_PAREN = "LEFT_PAREN";
+    this.RIGHT_PAREN = "RIGHT_PAREN";
+    this.LEFT_BRACE = "LEFT_BRACE";
+    this.RIGHT_BRACE = "RIGHT_BRACE";
+    this.COMMA = "COMMA";
+    this.DOT = "DOT";
+    this.MINUS = "MINUS";
+    this.PLUS = "PLUS";
+    this.SEMICOLON = "SEMICOLON";
+    this.SLASH = "SLASH";
+    this.STAR = "STAR";
+    // One or two character tokens.
+    this.BANG = "BANG";
+    this.BANG_EQUAL = "BANG_EQUAL";
+    this.EQUAL = "EQUAL";
+    this.EQUAL_EQUAL = "EQUAL_EQUAL";
+    this.GREATER = "GREATER";
+    this.GREATER_EQUAL = "GREATER_EQUAL";
+    this.LESS = "LESS";
+    this.LESS_EQUAL = "LESS_EQUAL";
+    // Literals.
+    this.IDENTIFIER = "IDENTIFIER";
+    this.STRING = "STRING";
+    this.NUMBER = "NUMBER";
+    // Keywords.
+    this.AND = "AND";
+    this.CLASS = "CLASS";
+    this.ELSE = "ELSE";
+    this.FALSE = "FALSE";
+    this.FUN = "FUN";
+    this.FOR = "FOR";
+    this.IF = "IF";
+    this.NIL = "NIL";
+    this.OR = "OR";
+    this.PRINT = "PRINT";
+    this.RETURN = "RETURN";
+    this.SUPER = "SUPER";
+    this.THIS = "THIS";
+    this.TRUE = "TRUE";
+    this.VAR = "VAR";
+    this.WHILE = "WHILE";
+    // EOF.
+    this.EOF = "EOF";
+  }
+}
+
+var TT = TokenType();
+
+class Token {
+  init(type, lexeme, literal, line) {
+    this.type = type;
+    this.lexeme = lexeme;
+    this.literal = literal;
+    this.line = line;
+  }
+
+  toString() {
+    return this.type + " '" + this.lexeme + "' " + str(this.literal);
+  }
+}
+
+var DIGITS = Map();
+for (var i = 0; i < 10; i = i + 1) {
+  DIGITS.set(str(i), true);
+}
+
+var ALPHAS = Map();
+var ALPHASET = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_";
+for (var i = 0; i < strlen(ALPHASET); i = i + 1) {
+  ALPHAS.set(substr(ALPHASET, i, i + 1), true);
+}
+
+class Scanner {
+  init(source) {
+    this.source = source;
+    this.tokens = List();
+    this.start = 0;
+    this.current = 0;
+    this.line = 1;
+
+    this.keywords = Map();
+    this.keywords.set("and",    TT.AND);
+    this.keywords.set("class",  TT.CLASS);
+    this.keywords.set("else",   TT.ELSE);
+    this.keywords.set("false",  TT.FALSE);
+    this.keywords.set("for",    TT.FOR);
+    this.keywords.set("fun",    TT.FUN);
+    this.keywords.set("if",     TT.IF);
+    this.keywords.set("nil",    TT.NIL);
+    this.keywords.set("or",     TT.OR);
+    this.keywords.set("print",  TT.PRINT);
+    this.keywords.set("return", TT.RETURN);
+    this.keywords.set("super",  TT.SUPER);
+    this.keywords.set("this",   TT.THIS);
+    this.keywords.set("true",   TT.TRUE);
+    this.keywords.set("var",    TT.VAR);
+    this.keywords.set("while",  TT.WHILE);
+  }
+
+  scanTokens() {
+    while (!this.isAtEnd()) {
+      this.start = this.current;
+      this.scanToken();
+    }
+
+    this.tokens.add(Token(TT.EOF, "", "\0", this.line));
+    return this.tokens;
+  }
+
+  scanToken() {
+    var c = this.advance();
+    if (c == "(") { return this.addToken(TT.LEFT_PAREN); }
+    if (c == ")") { return this.addToken(TT.RIGHT_PAREN); }
+    if (c == "{") { return this.addToken(TT.LEFT_BRACE); }
+    if (c == "}") { return this.addToken(TT.RIGHT_BRACE); }
+    if (c == ",") { return this.addToken(TT.COMMA); }
+    if (c == ".") { return this.addToken(TT.DOT); }
+    if (c == "-") { return this.addToken(TT.MINUS); }
+    if (c == "+") { return this.addToken(TT.PLUS); }
+    if (c == ";") { return this.addToken(TT.SEMICOLON); }
+    if (c == "*") { return this.addToken(TT.STAR); }
+    if (c == "!") {
+      if (this.match("=")) return this.addToken(TT.BANG_EQUAL);
+      else return this.addToken(TT.BANG);
+    }
+    if (c == "=") {
+      if (this.match("=")) return this.addToken(TT.EQUAL_EQUAL);
+      else return this.addToken(TT.EQUAL);
+    }
+    if (c == "<") {
+      if (this.match("=")) return this.addToken(TT.LESS_EQUAL);
+      else return this.addToken(TT.LESS);
+    }
+    if (c == ">") {
+      if (this.match("=")) return this.addToken(TT.GREATER_EQUAL);
+      else return this.addToken(TT.GREATER);
+    }
+    if (c == "/") {
+      if (this.match("/")) {
+        while (this.peek() != "\n" and !this.isAtEnd()) this.advance();
+        return;
+      } else return this.addToken(TT.SLASH);
+    }
+    if (c == " " or c == "\r" or c == "\t") return;
+    if (c == "\n") {
+      this.line = this.line + 1;
+      return;
+    }
+    if (c == "\"") return this.string();
+    if (this.isDigit(c)) return this.number();
+    if (this.isAlpha(c)) return this.identifier();
+    LOX.error(this.line, "Unexpected character.");
+    print(c);
+  }
+
+  identifier() {
+    while (this.isAlphaNumeric(this.peek())) this.advance();
+
+    var text = substr(this.source, this.start, this.current);
+    var type = this.keywords.get(text);
+    if (nil != type) type = TT.IDENTIFIER;
+    this.addToken(type);
+  }
+
+  string() {
+    while (this.peek() != "\"" and !this.isAtEnd()) {
+      if (this.peek() == "\n") this.line = this.line + 1;
+      this.advance();
+    }
+    if (this.isAtEnd()) return LOX.error(this.line, "Unterminated string.");
+    this.advance();
+    var value = substr(this.source, this.start + 1, this.current - 1);
+    this.addTokenLiteral(TT.STRING, value);
+  }
+
+  number() {
+    while (this.isDigit(this.peek())) this.advance();
+    if (this.peek() == "." and this.isDigit(this.peekNext())) {
+      this.advance();
+      while (this.isDigit(this.peek())) this.advance();
+    }
+    this.addTokenLiteral(TT.NUMBER, parse_float(substr(this.source, this.start, this.current)));
+  }
+
+  match(expected) {
+    if (this.isAtEnd()) return false;
+    if (substr(this.source, this.current, this.current + 1) != expected) return false;
+    this.current = this.current + 1;
+    return true;
+  }
+
+  peek() {
+    if (this.isAtEnd()) return "\0";
+    return substr(this.source, this.current, this.current + 1);
+  }
+
+  peekNext() {
+    if (this.current + 1 >= strlen(this.source)) return "\0";
+    return substr(this.source, this.current + 1, this.current + 2);
+  }
+
+  isAlpha(c) {
+    return !!ALPHAS.get(c);
+  }
+
+  isAlphaNumeric(c) {
+    return this.isAlpha(c) or this.isDigit(c);
+  }
+
+  isDigit(c) {
+    return !!DIGITS.get(str(c));
+  }
+
+  isAtEnd() {
+    return this.current >= strlen(this.source);
+  }
+
+  advance() {
+    this.current = this.current + 1;
+    return substr(this.source, this.current - 1, this.current);
+  }
+
+  addToken(type) {
+    this.addTokenLiteral(type, nil);
+  }
+
+  addTokenLiteral(type, literal) {
+    var text = substr(this.source, this.start, this.current);
+    this.tokens.add(Token(type, text, literal, this.line));
+  }
+}
+
+class Lox {
+  init() {
+    this.hadError = false;
+  }
+
+  error(line, message) {
+    this.report(line, "", message);
+  }
+
+  report(line, where, message) {
+    print("[line " + str(line) + "] Error" + str(where) + ": " + message);
+  }
+}
+
+var LOX = Lox();
+
+fun run(source) {
+  var scanner = Scanner(source);
+  var tokens = scanner.scanTokens();
+  for (var i = 0; i < tokens.size(); i = i + 1) {
+    print(tokens.get(i).toString());
+  }
+}
+
+fun runFile(filename) {
+  var source = readfile(filename);
+  run(source);
+}
+
+{
+  var args = process_args();
+  if (args.count > 1) {
+    print("Usage: loxlox [script]");
+  } else if (args.count == 1) {
+    runFile(args.(0));
+  } else {
+    print("Prompt not implemented.");
+  }
+}
