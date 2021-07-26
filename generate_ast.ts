@@ -49,6 +49,9 @@ const defineAst = (baseName: string, types: string[]) => {
     "Assign   = name: Token, value: Expr",
     "Binary   = left: Expr, operator: Token, right: Expr",
     "Call     = callee: Expr, paren: Token, args: Expr[]",
+    "Get      = object: Expr, name: Token",
+    "Set      = object: Expr, name: Token, value: Expr",
+    "This     = keyword: Token",
     "Grouping = expression: Expr",
     "Literal  = value: any",
     "Logical  = left: Expr, operator: Token, right: Expr",
@@ -60,6 +63,7 @@ const defineAst = (baseName: string, types: string[]) => {
   type Expr = expr.Expr;`);
   defineAst("Stmt", [
     "Block      = statements: Stmt[]",
+    "Class      = name: Token, methods: Function[]",
     "Expression = expression: Expr",
     "Function   = name: Token, parameters: Token[], body: Stmt[]",
     "If         = condition: Expr, thenBranch: Stmt, elseBranch: Stmt | null",

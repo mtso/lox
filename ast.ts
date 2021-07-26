@@ -10,6 +10,9 @@ export module expr {
     visitAssignExpr: (exp: Assign) => T;
     visitBinaryExpr: (exp: Binary) => T;
     visitCallExpr: (exp: Call) => T;
+    visitGetExpr: (exp: Get) => T;
+    visitSetExpr: (exp: Set) => T;
+    visitThisExpr: (exp: This) => T;
     visitGroupingExpr: (exp: Grouping) => T;
     visitLiteralExpr: (exp: Literal) => T;
     visitLogicalExpr: (exp: Logical) => T;
@@ -57,6 +60,45 @@ export module expr {
     }
     accept<T>(visitor: Visitor<T>): T {
       return visitor.visitCallExpr(this);
+    }
+  }
+  export class Get extends Expr {
+    object: Expr;
+    name: Token;
+
+    constructor(object: Expr, name: Token) {
+      super();
+      this.object = object;
+      this.name = name;
+    }
+    accept<T>(visitor: Visitor<T>): T {
+      return visitor.visitGetExpr(this);
+    }
+  }
+  export class Set extends Expr {
+    object: Expr;
+    name: Token;
+    value: Expr;
+
+    constructor(object: Expr, name: Token, value: Expr) {
+      super();
+      this.object = object;
+      this.name = name;
+      this.value = value;
+    }
+    accept<T>(visitor: Visitor<T>): T {
+      return visitor.visitSetExpr(this);
+    }
+  }
+  export class This extends Expr {
+    keyword: Token;
+
+    constructor(keyword: Token) {
+      super();
+      this.keyword = keyword;
+    }
+    accept<T>(visitor: Visitor<T>): T {
+      return visitor.visitThisExpr(this);
     }
   }
   export class Grouping extends Expr {
@@ -129,6 +171,7 @@ export module stmt {
   }
   export type Visitor<T> = {
     visitBlockStmt: (exp: Block) => T;
+    visitClassStmt: (exp: Class) => T;
     visitExpressionStmt: (exp: Expression) => T;
     visitFunctionStmt: (exp: Function) => T;
     visitIfStmt: (exp: If) => T;
@@ -146,6 +189,19 @@ export module stmt {
     }
     accept<T>(visitor: Visitor<T>): T {
       return visitor.visitBlockStmt(this);
+    }
+  }
+  export class Class extends Stmt {
+    name: Token;
+    methods: Function[];
+
+    constructor(name: Token, methods: Function[]) {
+      super();
+      this.name = name;
+      this.methods = methods;
+    }
+    accept<T>(visitor: Visitor<T>): T {
+      return visitor.visitClassStmt(this);
     }
   }
   export class Expression extends Stmt {

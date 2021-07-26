@@ -101,6 +101,7 @@ class Parser {
 
   private declaration(): Stmt | null {
     try {
+      if (this.match(TT.CLASS)) return this.classDeclaration();
       if (this.match(TT.FUN)) return this.function("function");
       if (this.match(TT.VAR)) return this.varDeclaration();
       return this.statement();
@@ -112,6 +113,17 @@ class Parser {
         throw err;
       }
     }
+  }
+
+  private classDeclaration(): Stmt {
+    const name = this.consume(TT.IDENTIFIER, "Expect class name.");
+    this.consume(TT.LEFT_BRACE, "Expect '{' before class body.");
+    const methods: stmt.Function[] = [];
+    while (!this.check(TT.RIGHT_BRACE) && !this.isAtEnd()) {
+      methods.push(this.function("method"));
+    }
+    this.consume(TT.RIGHT_BRACE, "Expect '}' after class body.");
+    return new stmt.Class(name, methods);
   }
 
   private statement(): Stmt {
@@ -242,10 +254,13 @@ class Parser {
     const exp = this.or();
     if (this.match(TT.EQUAL)) {
       const equals = this.previous();
-      const value = this.assignment();
+      const value = this.or();
       if (exp instanceof expr.Variable) {
         const name = (exp as expr.Variable).name;
         return new expr.Assign(name, value);
+      } else if (exp instanceof expr.Get) {
+        const get = exp as expr.Get;
+        return new expr.Set(get.object, get.name, value);
       }
       this.error(equals, "Invalid assignment target.");
     }
@@ -342,6 +357,12 @@ class Parser {
     while (true) {
       if (this.match(TT.LEFT_PAREN)) {
         exp = this.finishCall(exp);
+      } else if (this.match(TT.DOT)) {
+        const name = this.consume(
+          TT.IDENTIFIER,
+          "Expect property name after '.'.",
+        );
+        exp = new expr.Get(exp, name);
       } else {
         break;
       }
@@ -357,6 +378,8 @@ class Parser {
     if (this.match(TT.NUMBER, TT.STRING)) {
       return new expr.Literal(this.previous().literal);
     }
+
+    if (this.match(TT.THIS)) return new expr.This(this.previous());
 
     if (this.match(TT.IDENTIFIER)) {
       return new expr.Variable(this.previous());
@@ -436,7 +459,6 @@ class Parser {
 class Environment {
   enclosing: Environment | null;
   values: Map<string, any> = new Map<string, any>();
-  // values: { [name: string] : any } = {};
 
   constructor(enclosing?: Environment) {
     if (enclosing) {
@@ -512,11 +534,22 @@ abstract class LoxCallable {
 class LoxFunction extends LoxCallable {
   private declaration: stmt.Function;
   private closure: Environment;
+  private isInitializer: boolean;
 
-  constructor(declaration: stmt.Function, closure: Environment) {
+  constructor(
+    declaration: stmt.Function,
+    closure: Environment,
+    isInitializer: boolean,
+  ) {
     super();
     this.declaration = declaration;
     this.closure = closure;
+    this.isInitializer = isInitializer;
+  }
+  bind(instance: LoxInstance): LoxFunction {
+    const environment = new Environment(this.closure);
+    environment.define("this", instance);
+    return new LoxFunction(this.declaration, environment, this.isInitializer);
   }
   call(interpreter: Interpreter, args: any[]): any {
     const environment = new Environment(this.closure);
@@ -527,10 +560,14 @@ class LoxFunction extends LoxCallable {
       interpreter.executeBlock(this.declaration.body, environment);
     } catch (err) {
       if (err instanceof Return) {
+        if (this.isInitializer) return this.closure.getAt(0, "this");
         return (err as Return).value;
       } else {
         throw err;
       }
+    }
+    if (this.isInitializer) {
+      return this.closure.getAt(0, "this");
     }
     return null;
   }
@@ -545,12 +582,77 @@ class LoxFunction extends LoxCallable {
 enum FunctionType {
   NONE,
   FUNCTION,
+  INITIALIZER,
+  METHOD,
+}
+
+class LoxClass extends LoxCallable {
+  name: string;
+  private methods: Map<string, LoxFunction>;
+  constructor(name: string, methods: Map<string, LoxFunction>) {
+    super();
+    this.name = name;
+    this.methods = methods;
+  }
+  findMethod(name: string): LoxFunction | null {
+    if (this.methods.has(name)) {
+      return this.methods.get(name) as LoxFunction;
+    }
+    return null;
+  }
+  toString() {
+    return this.name;
+  }
+  call(interpreter: Interpreter, args: any[]): any {
+    const instance = new LoxInstance(this);
+    const initializer = this.findMethod("init");
+    if (null !== initializer) {
+      initializer.bind(instance).call(interpreter, args);
+    }
+    return instance;
+  }
+  arity(): number {
+    const initializer = this.findMethod("init");
+    if (null === initializer) {
+      return 0;
+    } else {
+      return initializer.arity();
+    }
+  }
+}
+
+enum ClassType {
+  NONE,
+  CLASS,
+}
+
+class LoxInstance {
+  private klass: LoxClass;
+  private fields: Map<string, any> = new Map<string, any>();
+  constructor(klass: LoxClass) {
+    this.klass = klass;
+  }
+  toString() {
+    return this.klass.name + " instance";
+  }
+  get(name: Token): any {
+    if (this.fields.has(name.lexeme)) {
+      return this.fields.get(name.lexeme);
+    }
+    const method = this.klass.findMethod(name.lexeme);
+    if (null !== method) return method.bind(this);
+    throw new RuntimeError(name, `Undefined property '${name.lexeme}'.`);
+  }
+  set(name: Token, value: any) {
+    this.fields.set(name.lexeme, value);
+  }
 }
 
 class Resolver implements expr.Visitor<void>, stmt.Visitor<void> {
   private interpreter: Interpreter;
   private scopes: Map<string, boolean>[] = [];
   private currentFunction: FunctionType = FunctionType.NONE;
+  private currentClass: ClassType = ClassType.NONE;
 
   constructor(interpreter: Interpreter) {
     this.interpreter = interpreter;
@@ -613,6 +715,26 @@ class Resolver implements expr.Visitor<void>, stmt.Visitor<void> {
     this.resolveStmts(stm.statements);
     this.endScope();
   }
+  visitClassStmt(stm: stmt.Class) {
+    const enclosingClass = this.currentClass;
+    this.currentClass = ClassType.CLASS;
+
+    this.declare(stm.name);
+    this.define(stm.name);
+
+    this.beginScope();
+    this.scopes[this.scopes.length - 1].set("this", true);
+    for (const method of stm.methods) {
+      let declaration = FunctionType.METHOD;
+      if (method.name.lexeme === "init") {
+        declaration = FunctionType.INITIALIZER;
+      }
+      this.resolveFunction(method, declaration);
+    }
+    this.endScope();
+
+    this.currentClass = enclosingClass;
+  }
   visitExpressionStmt(stm: stmt.Expression) {
     this.resolveExpr(stm.expression);
   }
@@ -633,7 +755,15 @@ class Resolver implements expr.Visitor<void>, stmt.Visitor<void> {
     if (this.currentFunction === FunctionType.NONE) {
       Lox.errorToken(stm.keyword, "Can't return from. top-level code.");
     }
-    if (stm.value !== null) this.resolveExpr(stm.value);
+    if (stm.value !== null) {
+      if (this.currentFunction === FunctionType.INITIALIZER) {
+        Lox.errorToken(
+          stm.keyword,
+          "Can't return a value from an initializer.",
+        );
+      }
+      this.resolveExpr(stm.value);
+    }
   }
   visitVarStmt(stm: stmt.Var) {
     this.declare(stm.name);
@@ -660,6 +790,9 @@ class Resolver implements expr.Visitor<void>, stmt.Visitor<void> {
       this.resolveExpr(arg);
     }
   }
+  visitGetExpr(exp: expr.Get) {
+    this.resolveExpr(exp.object);
+  }
   visitGroupingExpr(exp: expr.Grouping) {
     this.resolveExpr(exp.expression);
   }
@@ -667,6 +800,17 @@ class Resolver implements expr.Visitor<void>, stmt.Visitor<void> {
   visitLogicalExpr(exp: expr.Logical) {
     this.resolveExpr(exp.left);
     this.resolveExpr(exp.right);
+  }
+  visitSetExpr(exp: expr.Set) {
+    this.resolveExpr(exp.value);
+    this.resolveExpr(exp.object);
+  }
+  visitThisExpr(exp: expr.This) {
+    if (this.currentClass === ClassType.NONE) {
+      Lox.errorToken(exp.keyword, "Can't use 'this' outside of a class.");
+      return;
+    }
+    this.resolveLocal(exp, exp.keyword);
   }
   visitUnaryExpr(exp: expr.Unary) {
     this.resolveExpr(exp.right);
@@ -702,7 +846,53 @@ class Interpreter implements expr.Visitor<any>, stmt.Visitor<void> {
         return "<native fn clock>";
       }
     }
+    class RtSubstr extends LoxCallable {
+      arity(): number {
+        return 3;
+      }
+      call(interpreter: Interpreter, args: any[]): any {
+        const str = args[0];
+        const start = args[1];
+        const end = args[2];
+        if (typeof str !== "string") {
+          throw new RuntimeError({} as Token, "Invalid arg to substr");
+        }
+        return str.substring(start, end);
+      }
+    }
+    class RtStrlen extends LoxCallable {
+      arity(): number {
+        return 1;
+      }
+      call(interpreter: Interpreter, args: any[]): any {
+        const str = args[0];
+        if (typeof str !== "string") {
+          throw new RuntimeError({} as Token, "Invalid arg to strlen");
+        }
+        return str.length;
+      }
+    }
+    class RtReadfile extends LoxCallable {
+      arity(): number {
+        return 1;
+      }
+      call(interpreter: Interpreter, args: any[]): any {
+        try {
+          const contents = Deno.readTextFileSync(args[0]);
+          return contents;
+        } catch (err) {
+          throw new RuntimeError(
+            {} as Token,
+            `Failed to read '${args[0]}': ` + err.message,
+          );
+        }
+      }
+    }
+
     this.globals.define("clock", new RtClock());
+    this.globals.define("substr", new RtSubstr());
+    this.globals.define("strlen", new RtStrlen());
+    this.globals.define("readfile", new RtReadfile());
   }
 
   interpret(statements: Stmt[]) {
@@ -747,12 +937,27 @@ class Interpreter implements expr.Visitor<any>, stmt.Visitor<void> {
     this.executeBlock(stm.statements, new Environment(this.environment));
   }
 
+  visitClassStmt(stm: stmt.Class) {
+    this.environment.define(stm.name.lexeme, null);
+    const methods = new Map<string, LoxFunction>();
+    for (const method of stm.methods) {
+      const func = new LoxFunction(
+        method,
+        this.environment,
+        method.name.lexeme === "init",
+      );
+      methods.set(method.name.lexeme, func);
+    }
+    const klass = new LoxClass(stm.name.lexeme, methods);
+    this.environment.assign(stm.name, klass);
+  }
+
   visitExpressionStmt(stm: stmt.Expression) {
     this.evaluate(stm.expression);
   }
 
   visitFunctionStmt(stm: stmt.Function) {
-    const func = new LoxFunction(stm, this.environment);
+    const func = new LoxFunction(stm, this.environment, false);
     this.environment.define(stm.name.lexeme, func);
   }
 
@@ -799,20 +1004,6 @@ class Interpreter implements expr.Visitor<any>, stmt.Visitor<void> {
       this.globals.assign(exp.name, value);
     }
     return value;
-  }
-
-  visitLiteralExpr(exp: expr.Literal): any {
-    return exp.value;
-  }
-
-  visitLogicalExpr(exp: expr.Logical): any {
-    const left = this.evaluate(exp.left);
-    if (exp.operator.typ == TT.OR) {
-      if (this.isTruthy(left)) return left;
-    } else {
-      if (!this.isTruthy(left)) return left;
-    }
-    return this.evaluate(exp.right);
   }
 
   visitBinaryExpr(exp: expr.Binary): any {
@@ -880,8 +1071,44 @@ class Interpreter implements expr.Visitor<any>, stmt.Visitor<void> {
     return func.call(this, args);
   }
 
+  visitGetExpr(exp: expr.Get): any {
+    const object = this.evaluate(exp.object);
+    if (object instanceof LoxInstance) {
+      return (object as LoxInstance).get(exp.name);
+    }
+    throw new RuntimeError(exp.name, "Only instances have properties.");
+  }
+
   visitGroupingExpr(exp: expr.Grouping): any {
     return this.evaluate(exp.expression);
+  }
+
+  visitLiteralExpr(exp: expr.Literal): any {
+    return exp.value;
+  }
+
+  visitLogicalExpr(exp: expr.Logical): any {
+    const left = this.evaluate(exp.left);
+    if (exp.operator.typ == TT.OR) {
+      if (this.isTruthy(left)) return left;
+    } else {
+      if (!this.isTruthy(left)) return left;
+    }
+    return this.evaluate(exp.right);
+  }
+
+  visitSetExpr(exp: expr.Set): any {
+    const object = this.evaluate(exp.object);
+    if (!(object instanceof LoxInstance)) {
+      throw new RuntimeError(exp.name, "Only instances have fields.");
+    }
+    const value = this.evaluate(exp.value);
+    (object as LoxInstance).set(exp.name, value);
+    return value;
+  }
+
+  visitThisExpr(exp: expr.This): any {
+    return this.lookupVariable(exp.keyword, exp);
   }
 
   visitUnaryExpr(exp: expr.Unary): any {
@@ -898,7 +1125,6 @@ class Interpreter implements expr.Visitor<any>, stmt.Visitor<void> {
 
   visitVariableExpr(exp: expr.Variable): any {
     return this.lookupVariable(exp.name, exp);
-    // this.environment.get(exp.name);
   }
 
   private lookupVariable(name: Token, expr: Expr): any {

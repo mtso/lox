@@ -1,0 +1,21 @@
+class Foo {
+  init() {
+    print this;
+  }
+}
+
+var foo = Foo();
+
+class Bar {
+  init(name) {
+    if (false) return;
+    this.name = name;
+    if (true) return;
+  }
+  greet() {
+    print("hi " + this.name);
+  }
+}
+
+var bar = Bar("world");
+bar.greet();
