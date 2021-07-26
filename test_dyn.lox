@@ -36,3 +36,25 @@ map.set("foo", "foo");
 map.set("bar", "bar");
 expect("foo" == map.get("foo"), "foo should be stored");
 expect(map.count() == 2, "map size should be in sync");
+
+// dynamic prop on this.
+var prop = "foo_prop";
+class Foo {
+  init() {
+    this.(prop) = "hello";
+  }
+
+  getProp() {
+    return this.(prop);
+  }
+
+  getPropClosure() {
+    fun closure() {
+      return this.(prop);
+    }
+    return closure;
+  }
+}
+
+expect("hello" == Foo().getProp(), "this should have prop");
+expect("hello" == Foo().getPropClosure()(), "this in closure should also have prop");

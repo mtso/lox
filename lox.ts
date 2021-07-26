@@ -261,7 +261,7 @@ class Parser {
     const exp = this.or();
     if (this.match(TT.EQUAL)) {
       const equals = this.previous();
-      const value = this.or();
+      const value = this.assignment();
       if (exp instanceof expr.Variable) {
         const name = (exp as expr.Variable).name;
         return new expr.Assign(name, value);
@@ -428,7 +428,7 @@ class Parser {
       return new expr.Grouping(exp);
     }
 
-    throw new ParseError();
+    throw this.error(this.peek(), "Expect expression.");
   }
 
   private match(...types: TokenType[]): boolean {
@@ -619,7 +619,7 @@ class LoxFunction extends LoxCallable {
     return this.declaration.parameters.length;
   }
   toString(): string {
-    return `<fn ${this.declaration.name.lexeme} >`;
+    return `<fn ${this.declaration.name.lexeme}>`;
   }
 }
 
@@ -828,7 +828,7 @@ class Resolver implements expr.Visitor<void>, stmt.Visitor<void> {
   }
   visitReturnStmt(stm: stmt.Return) {
     if (this.currentFunction === FunctionType.NONE) {
-      Lox.errorToken(stm.keyword, "Can't return from. top-level code.");
+      Lox.errorToken(stm.keyword, "Can't return from top-level code.");
     }
     if (stm.value !== null) {
       if (this.currentFunction === FunctionType.INITIALIZER) {
@@ -938,7 +938,7 @@ class Interpreter implements expr.Visitor<any>, stmt.Visitor<void> {
         return Date.now() / 1000;
       }
       toString(): string {
-        return "<native fn clock>";
+        return "<native fn>";
       }
     }
     class RtSubstr extends LoxCallable {
@@ -1092,7 +1092,11 @@ class Interpreter implements expr.Visitor<any>, stmt.Visitor<void> {
 
   visitPrintStmt(stm: stmt.Print) {
     const value = this.evaluate(stm.expression);
-    Deno.stdout.write(ENC.encode(this.stringify(value) + "\n"));
+    // Rely on console.log for now since
+    // stdout.write returns a Promise that
+    // a runtime error could interrupt.
+    // console.log(this.stringify(value));
+    Deno.stdout.writeSync(ENC.encode(this.stringify(value) + "\n"));
   }
 
   visitReturnStmt(stm: stmt.Return) {
@@ -1318,13 +1322,27 @@ class Interpreter implements expr.Visitor<any>, stmt.Visitor<void> {
   private stringify(object: any) {
     if (null === object) return "nil";
     if (typeof object === "number") {
+      if (object === 0) {
+        const bytes = this.doubleToByteArray(object);
+        // Not really sure why this is expected...
+        if (bytes[0] === -128) return "-0"; 
+      }
       return JSON.stringify(object);
-    }
+    } 
     if (typeof object === "string") {
-      const str = JSON.stringify(object);
-      return str.substring(1, str.length - 1);
+      return object;
+    }
+    if (object.toString) {
+      return object.toString();
     }
     return JSON.stringify(object);
+  }
+
+  private doubleToByteArray(num: number) {
+    const buffer = new ArrayBuffer(8);         // JS numbers are 8 bytes long, or 64 bits
+    const longNum = new Float64Array(buffer);  // so equivalent to Float64
+    longNum[0] = num;
+    return Array.from(new Int8Array(buffer)).reverse();  // reverse to get little endian
   }
 }
 
@@ -1335,24 +1353,28 @@ class Scanner {
   private current: number = 0;
   private line: number = 1;
 
-  static keywords: { [keyword: string]: TokenType } = {
-    "and": TT.AND,
-    "class": TT.CLASS,
-    "else": TT.ELSE,
-    "false": TT.FALSE,
-    "for": TT.FOR,
-    "fun": TT.FUN,
-    "if": TT.IF,
-    "nil": TT.NIL,
-    "or": TT.OR,
-    "print": TT.PRINT,
-    "return": TT.RETURN,
-    "super": TT.SUPER,
-    "this": TT.THIS,
-    "true": TT.TRUE,
-    "var": TT.VAR,
-    "while": TT.WHILE,
-  };
+  static keywords: Map<string, TokenType> = Scanner.initKeywords();
+
+  private static initKeywords(): Map<string, TokenType> {
+    const keywords = new Map<string, TokenType>();
+    keywords.set("and", TT.AND);
+    keywords.set("class", TT.CLASS);
+    keywords.set("else", TT.ELSE);
+    keywords.set("false", TT.FALSE);
+    keywords.set("for", TT.FOR);
+    keywords.set("fun", TT.FUN);
+    keywords.set("if", TT.IF);
+    keywords.set("nil", TT.NIL);
+    keywords.set("or", TT.OR);
+    keywords.set("print", TT.PRINT);
+    keywords.set("return", TT.RETURN);
+    keywords.set("super", TT.SUPER);
+    keywords.set("this", TT.THIS);
+    keywords.set("true", TT.TRUE);
+    keywords.set("var", TT.VAR);
+    keywords.set("while", TT.WHILE);
+    return keywords;
+  }
 
   constructor(source: string) {
     this.source = source;
@@ -1448,8 +1470,8 @@ class Scanner {
   private identifier() {
     while (this.isAlphaNumeric(this.peek())) this.advance();
     const text = this.source.substring(this.start, this.current);
-    let typ: TokenType = Scanner.keywords[text];
-    if (typ == null) typ = TT.IDENTIFIER;
+    let typ: TokenType | null = Scanner.keywords.get(text) || null;
+    if (typ === null) typ = TT.IDENTIFIER;
     this.addToken(typ);
   }
 
@@ -1604,8 +1626,6 @@ const ENC = new TextEncoder();
 function run(source: string) {
   const scanner = new Scanner(source);
   const tokens = scanner.scanTokens();
-  if (Lox.hadError) return;
-
   const parser = new Parser(tokens);
   const statements = parser.parse();
 
