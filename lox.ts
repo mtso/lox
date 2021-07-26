@@ -261,6 +261,9 @@ class Parser {
       } else if (exp instanceof expr.Get) {
         const get = exp as expr.Get;
         return new expr.Set(get.object, get.name, value);
+      } else if (exp instanceof expr.GetDyn) {
+        const get = exp as expr.GetDyn;
+        return new expr.SetDyn(get.object, get.dot, get.name, value);
       }
       this.error(equals, "Invalid assignment target.");
     }
@@ -358,11 +361,28 @@ class Parser {
       if (this.match(TT.LEFT_PAREN)) {
         exp = this.finishCall(exp);
       } else if (this.match(TT.DOT)) {
-        const name = this.consume(
-          TT.IDENTIFIER,
-          "Expect property name after '.'.",
-        );
-        exp = new expr.Get(exp, name);
+        if (this.match(TT.LEFT_PAREN)) {
+          const dot = this.previous();
+          const name = this.expression();
+          this.consume(TT.RIGHT_PAREN, "Expect ')' after expression.");
+          exp = new expr.GetDyn(exp, dot, name);
+        } else {
+          // Converts identifier-property accesses into dynamic
+          // get, but dynamic get handler also returns nil
+          // for not-found properties.
+          // const name = this.consume(
+          //   TT.IDENTIFIER,
+          //   "Expect property name after '.'.",
+          // );
+          // const propName = new expr.Literal(name.lexeme);
+          // exp = new expr.GetDyn(exp, name, propName);
+
+          const name = this.consume(
+            TT.IDENTIFIER,
+            "Expect property name after '.'.",
+          );
+          exp = new expr.Get(exp, name);
+        }
       } else {
         break;
       }
@@ -643,8 +663,20 @@ class LoxInstance {
     if (null !== method) return method.bind(this);
     throw new RuntimeError(name, `Undefined property '${name.lexeme}'.`);
   }
+  getDyn(name: string, where: Token): any {
+    if (this.fields.has(name)) {
+      return this.fields.get(name);
+    }
+    const method = this.klass.findMethod(name);
+    if (null !== method) return method.bind(this);
+    return null;
+    // throw new RuntimeError(where, `Undefined property '${name}'.`);
+  }
   set(name: Token, value: any) {
     this.fields.set(name.lexeme, value);
+  }
+  setDyn(name: string, value: any, where: Token): any {
+    this.fields.set(name, value);
   }
 }
 
@@ -793,6 +825,10 @@ class Resolver implements expr.Visitor<void>, stmt.Visitor<void> {
   visitGetExpr(exp: expr.Get) {
     this.resolveExpr(exp.object);
   }
+  visitGetDynExpr(exp: expr.GetDyn) {
+    this.resolveExpr(exp.object);
+    this.resolveExpr(exp.name);
+  }
   visitGroupingExpr(exp: expr.Grouping) {
     this.resolveExpr(exp.expression);
   }
@@ -803,6 +839,11 @@ class Resolver implements expr.Visitor<void>, stmt.Visitor<void> {
   }
   visitSetExpr(exp: expr.Set) {
     this.resolveExpr(exp.value);
+    this.resolveExpr(exp.object);
+  }
+  visitSetDynExpr(exp: expr.SetDyn) {
+    this.resolveExpr(exp.value);
+    this.resolveExpr(exp.name);
     this.resolveExpr(exp.object);
   }
   visitThisExpr(exp: expr.This) {
@@ -1079,6 +1120,15 @@ class Interpreter implements expr.Visitor<any>, stmt.Visitor<void> {
     throw new RuntimeError(exp.name, "Only instances have properties.");
   }
 
+  visitGetDynExpr(exp: expr.GetDyn): any {
+    const object = this.evaluate(exp.object);
+    if (object instanceof LoxInstance) {
+      const name = this.evaluate(exp.name);
+      return (object as LoxInstance).getDyn(name, exp.dot);
+    }
+    throw new RuntimeError(exp.dot, "Only instances have properties.");
+  }
+
   visitGroupingExpr(exp: expr.Grouping): any {
     return this.evaluate(exp.expression);
   }
@@ -1107,6 +1157,16 @@ class Interpreter implements expr.Visitor<any>, stmt.Visitor<void> {
     return value;
   }
 
+  visitSetDynExpr(exp: expr.SetDyn): any {
+    const object = this.evaluate(exp.object);
+    if (!(object instanceof LoxInstance)) {
+      throw new RuntimeError(exp.dot, "Only instances have fields.");
+    }
+    const name = this.evaluate(exp.name);
+    const value = this.evaluate(exp.value);
+    (object as LoxInstance).setDyn(name, value, exp.dot);
+  }
+
   visitThisExpr(exp: expr.This): any {
     return this.lookupVariable(exp.keyword, exp);
   }
@@ -1127,8 +1187,8 @@ class Interpreter implements expr.Visitor<any>, stmt.Visitor<void> {
     return this.lookupVariable(exp.name, exp);
   }
 
-  private lookupVariable(name: Token, expr: Expr): any {
-    const distance = this.locals.get(expr);
+  private lookupVariable(name: Token, exp: Expr): any {
+    const distance = this.locals.get(exp);
     if (distance !== null && distance !== undefined) {
       return this.environment.getAt(distance, name.lexeme);
     } else {

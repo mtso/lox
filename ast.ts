@@ -10,8 +10,10 @@ export module expr {
     visitAssignExpr: (exp: Assign) => T;
     visitBinaryExpr: (exp: Binary) => T;
     visitCallExpr: (exp: Call) => T;
+    visitGetDynExpr: (exp: GetDyn) => T;
     visitGetExpr: (exp: Get) => T;
     visitSetExpr: (exp: Set) => T;
+    visitSetDynExpr: (exp: SetDyn) => T;
     visitThisExpr: (exp: This) => T;
     visitGroupingExpr: (exp: Grouping) => T;
     visitLiteralExpr: (exp: Literal) => T;
@@ -62,6 +64,21 @@ export module expr {
       return visitor.visitCallExpr(this);
     }
   }
+  export class GetDyn extends Expr {
+    object: Expr;
+    dot: Token;
+    name: Expr;
+
+    constructor(object: Expr, dot: Token, name: Expr) {
+      super();
+      this.object = object;
+      this.dot = dot;
+      this.name = name;
+    }
+    accept<T>(visitor: Visitor<T>): T {
+      return visitor.visitGetDynExpr(this);
+    }
+  }
   export class Get extends Expr {
     object: Expr;
     name: Token;
@@ -88,6 +105,23 @@ export module expr {
     }
     accept<T>(visitor: Visitor<T>): T {
       return visitor.visitSetExpr(this);
+    }
+  }
+  export class SetDyn extends Expr {
+    object: Expr;
+    dot: Token;
+    name: Expr;
+    value: Expr;
+
+    constructor(object: Expr, dot: Token, name: Expr, value: Expr) {
+      super();
+      this.object = object;
+      this.dot = dot;
+      this.name = name;
+      this.value = value;
+    }
+    accept<T>(visitor: Visitor<T>): T {
+      return visitor.visitSetDynExpr(this);
     }
   }
   export class This extends Expr {

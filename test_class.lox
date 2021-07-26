@@ -19,3 +19,7 @@ class Bar {
 
 var bar = Bar("world");
 bar.greet();
+bar.("greet")();
+
+bar.("foo") = bar.greet;
+bar.("foo")();

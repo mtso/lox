@@ -1,0 +1,19 @@
+var str = "hello world";
+print(substr(str, 0, 5));
+print(strlen(str));
+print(substr(str, strlen(str) - 5, strlen(str)));
+print(substr(str, 0, 5) == "hello");
+
+var path = "test_func.lox";
+print(readfile(path));
+
+var start = clock();
+var j = 0;
+//for (var i = 0; i < 100000; i++) { // silently ignores ++
+for (var i = 0; i < 100000; i = i + 1) {
+  j = i;
+}
+var end = clock();
+print(start);
+print(end);
+print(end - start);

@@ -1,0 +1,38 @@
+class Object {}
+
+class Map {
+  init() {
+    this._count = 0;
+    this._map = Object();
+  }
+  get(key) {
+    return this._map.(key);
+  }
+  set(key, value) {
+    this._map.(key) = value;
+    this._count = this._count + 1;
+  }
+  count() {
+    return this._count;
+  }
+  unset(key) {
+    var value = this._map.get(key);
+    this._map.(key) = nil;
+    this._count = this._count - 1;
+    return value;
+  }
+}
+
+fun expect(condition, message) {
+  if (condition) {
+    print("PASS : " + message);
+  } else {
+    print("FAIL : " + message);
+  }
+}
+
+var map = Map();
+map.set("foo", "foo");
+map.set("bar", "bar");
+expect("foo" == map.get("foo"), "foo should be stored");
+expect(map.count() == 2, "map size should be in sync");
