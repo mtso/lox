@@ -109,6 +109,19 @@ class Literal {
     return "Literal";
   }
 }
+class Logical {
+  init(left, operator, right) {
+    this.left = left;
+    this.operator = operator;
+    this.right = right;
+  }
+  accept(visitor) {
+    return visitor.visitLogicalExpr(this);
+  }
+  getClassName() {
+    return "Logical";
+  }
+}
 class Unary {
   init(operator, right) {
     this.operator = operator;
@@ -159,6 +172,19 @@ class Expression {
     return "Expression";
   }
 }
+class If {
+  init(condition, thenBranch, elseBranch) {
+    this.condition = condition;
+    this.thenBranch = thenBranch;
+    this.elseBranch = elseBranch;
+  }
+  accept(visitor) {
+    return visitor.visitIfStmt(this);
+  }
+  getClassName() {
+    return "If";
+  }
+}
 class Print {
   init(expression) {
     this.expression = expression;
@@ -182,17 +208,32 @@ class Var {
     return "Var";
   }
 }
+class While {
+  init(condition, body) {
+    this.condition = condition;
+    this.body = body;
+  }
+  accept(visitor) {
+    return visitor.visitWhileStmt(this);
+  }
+  getClassName() {
+    return "While";
+  }
+}
 class Visitor {
   visitAssignExpr(expr) { print("visitAssignExpr not implemented! " + str(this)); }
   visitBinaryExpr(expr) { print("visitBinaryExpr not implemented! " + str(this)); }
   visitGroupingExpr(expr) { print("visitGroupingExpr not implemented! " + str(this)); }
   visitLiteralExpr(expr) { print("visitLiteralExpr not implemented! " + str(this)); }
+  visitLogicalExpr(expr) { print("visitLogicalExpr not implemented! " + str(this)); }
   visitUnaryExpr(expr) { print("visitUnaryExpr not implemented! " + str(this)); }
   visitVariableExpr(expr) { print("visitVariableExpr not implemented! " + str(this)); }
   visitBlockStmt(stmt) { print("visitBlockStmt not implemented! " + str(this)); }
   visitExpressionStmt(stmt) { print("visitExpressionStmt not implemented! " + str(this)); }
+  visitIfStmt(stmt) { print("visitIfStmt not implemented! " + str(this)); }
   visitPrintStmt(stmt) { print("visitPrintStmt not implemented! " + str(this)); }
   visitVarStmt(stmt) { print("visitVarStmt not implemented! " + str(this)); }
+  visitWhileStmt(stmt) { print("visitWhileStmt not implemented! " + str(this)); }
 }
 // end ast
 
@@ -554,9 +595,95 @@ class Parser {
   }
 
   statement() {
+    if (this.match(TT.FOR)) return this.forStatement();
+    if (this.match(TT.IF)) return this.ifStatement();
     if (this.match(TT.PRINT)) return this.printStatement();
+    if (this.match(TT.WHILE)) return this.whileStatement();
     if (this.match(TT.LEFT_BRACE)) return this.blockStatement();
     return this.expressionStatement();
+  }
+
+  forStatement() {
+    var result = this.consume(TT.LEFT_PAREN, "Expect '(' after 'for'.");
+    if (!result.ok) return result;
+
+    var initializer;
+    if (this.match(TT.SEMICOLON)) initializer = nil;
+    else {
+      if (this.match(TT.VAR)) {
+        var varDec = this.varDeclaration();
+        if (!varDec.ok) return varDec;
+        initializer = varDec.value;
+      } else {
+        var expr = this.expressionStatement();
+        if (!expr.ok) return expr;
+        initializer = expr.value;
+      }
+    }
+
+    var condition = nil;
+    if (!this.check(TT.SEMICOLON)) {
+      var expr = this.expression();
+      if (!expr.ok) return expr;
+      condition = expr.value;
+    }
+    result = this.consume(TT.SEMICOLON, "Expect ';' after loop condition.");
+    if (!result.ok) return result;
+
+    var increment = nil;
+    if (!this.check(TT.RIGHT_PAREN)) {
+      var expr = this.expression();
+      if (!expr.ok) return expr;
+      increment = expr.value;
+    }
+    result = this.consume(TT.RIGHT_PAREN, "Expect ')' after for.");
+    if (!result.ok) return result;
+
+    var body = this.statement();
+    if (!body.ok) return body;
+    body = body.value;
+
+    // Desugar into While
+
+    if (nil != increment) {
+      var statements = List();
+      statements.add(body);
+      statements.add(Expression(increment));
+      body = Block(statements);
+    }
+
+    if (nil == condition) condition = Literal(true);
+    body = While(condition, body);
+
+    if (nil != initializer) {
+      var statements = List();
+      statements.add(initializer);
+      statements.add(body);
+      body = Block(statements);
+    }
+
+    return ok(body);
+  }
+
+  ifStatement() {
+    var result = this.consume(TT.LEFT_PAREN, "Expect '(' after 'if'.");
+    if (!result.ok) return result;
+    var condition = this.expression();
+    if (!condition.ok) return condition;
+    result = this.consume(TT.RIGHT_PAREN, "Expect ')' after if condition.");
+    if (!result.ok) return result;
+
+    var thenBranch = this.statement();
+    if (!thenBranch.ok) return thenBranch;
+
+    var elseBranch = nil;
+    if (this.match(TT.ELSE)) {
+      var branch = this.statement();
+      if (!branch.ok) return branch;
+      elseBranch = branch.value;
+    }
+
+    return ok(If(condition.value, thenBranch.value, elseBranch));
   }
 
   printStatement() {
@@ -581,6 +708,18 @@ class Parser {
     return ok(Var(name.value, initializer));
   }
 
+  whileStatement() {
+    var result = this.consume(TT.LEFT_PAREN, "Expect '(' after 'while'.");
+    if (!result.ok) return result;
+    var condition = this.expression();
+    if (!condition.ok) return condition;
+    result = this.consume(TT.RIGHT_PAREN, "Expect ')' after condition.");
+    if (!result.ok) return result;
+    var body = this.statement();
+    if (!body.ok) return body;
+    return ok(While(condition.value, body.value));
+  }
+
   expressionStatement() {
     var expr = this.expression();
     if (!expr.ok) return expr;
@@ -602,7 +741,7 @@ class Parser {
   }
 
   assignment() {
-    var expr = this.equality();
+    var expr = this.orClause();
     if (!expr.ok) return expr;
     if (this.match(TT.EQUAL))  {
       var equals = this.previous();
@@ -617,6 +756,35 @@ class Parser {
       }
     }
     return expr;
+  }
+
+  // change?
+  orClause() {
+    var expr = this.andClause();
+    if (!expr.ok) return expr;
+    expr = expr.value;
+
+    while (this.match(TT.OR)) {
+      var operator = this.previous();
+      var right = this.andClause();
+      if (!right.ok) return right;
+      expr = Logical(expr, operator, right.value);
+    }
+    return ok(expr);
+  }
+
+  andClause() {
+    var expr = this.equality();
+    if (!expr.ok) return expr;
+    expr = expr.value;
+
+    while (this.match(TT.AND)) {
+      var operator = this.previous();
+      var right = this.equality();
+      if (!right.ok) return right;
+      expr = Logical(expr, operator, right.value);
+    }
+    return ok(expr);
   }
 
   equality() {
@@ -803,6 +971,14 @@ class Interpreter < Visitor {
     return this.evaluate(stmt.expression);
   }
 
+  visitIfStmt(stmt) {
+    var condition = this.evaluate(stmt.condition);
+    if (!condition.ok) return condition;
+    if (this.isTruthy(condition.value)) return this.execute(stmt.thenBranch);
+    if (stmt.elseBranch != nil) return this.execute(stmt.elseBranch);
+    return ok(nil);
+  }
+
   visitPrintStmt(stmt) {
     var value = this.evaluate(stmt.expression);
     if (!value.ok) return value;
@@ -818,6 +994,18 @@ class Interpreter < Visitor {
       value = result.value;
     }
     this.environment.define(stmt.name.lexeme, value);
+    return ok(nil);
+  }
+
+  visitWhileStmt(stmt) {
+    var condition = this.evaluate(stmt.condition);
+    if (!condition.ok) return condition; else condition = condition.value;
+    while (this.isTruthy(condition)) {
+      var result = this.execute(stmt.body);
+      if (!result.ok) return result;
+      condition = this.evaluate(stmt.condition);
+      if (!condition.ok) return condition; else condition = condition.value;
+    }
     return ok(nil);
   }
 
@@ -899,6 +1087,17 @@ class Interpreter < Visitor {
     return ok(expr.value);
   }
 
+  visitLogicalExpr(expr) {
+    var left = this.evaluate(expr.left);
+    if (!left.ok) return left;
+    if (expr.operator.type == TT.OR) {
+      if (this.isTruthy(left.value)) return ok(left.value);
+    } else { // else AND
+      if (!this.isTruthy(left.value)) return ok(left.value);
+    }
+    return this.evaluate(expr.right);
+  }
+
   visitUnaryExpr(expr) {
     var right = this.evaluate(expr.right);
     if (!right.ok) return right;
@@ -965,9 +1164,7 @@ class Interpreter < Visitor {
 
   stringify(object) {
     if (nil == object) return "nil";
-    if (this.isNumber(object)) {
-      return str(object);
-    }
+    if (this.isNumber(object)) return str(object);
     return str(object);
   }
 }

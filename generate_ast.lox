@@ -96,14 +96,17 @@ fun defineVisitor(exprTypes, stmtTypes) {
   exprTypes.add("Binary : left, operator, right");
   exprTypes.add("Grouping : expression");
   exprTypes.add("Literal : value");
+  exprTypes.add("Logical : left, operator, right");
   exprTypes.add("Unary : operator, right");
   exprTypes.add("Variable : name");
 
   var stmtTypes = List();
   stmtTypes.add("Block : statements");
   stmtTypes.add("Expression : expression");
+  stmtTypes.add("If : condition, thenBranch, elseBranch");
   stmtTypes.add("Print : expression");
   stmtTypes.add("Var : name, initializer");
+  stmtTypes.add("While : condition, body");
 
   print("// begin ast");
   defineAst("Expr", exprTypes);
