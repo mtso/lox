@@ -690,9 +690,9 @@ class LoxInstance {
     if (null !== method) return method.bind(this);
     throw new RuntimeError(name, `Undefined property '${name.lexeme}'.`);
   }
-  getDyn(name: string, where: Token): any {
-    if (this.fields.has("" + name)) {
-      return this.fields.get("" + name);
+  getDyn(name: any, where: Token): any {
+    if (this.fields.has(name)) {
+      return this.fields.get(name);
     }
     const method = this.klass.findMethod(name);
     if (null !== method) return method.bind(this);
@@ -702,8 +702,8 @@ class LoxInstance {
   set(name: Token, value: any) {
     this.fields.set(name.lexeme, value);
   }
-  setDyn(name: string, value: any, where: Token): any {
-    this.fields.set("" + name, value);
+  setDyn(name: any, value: any, where: Token): any {
+    this.fields.set(name, value);
   }
 }
 
@@ -1018,7 +1018,7 @@ class Interpreter implements expr.Visitor<any>, stmt.Visitor<void> {
         const container = new LoxInstance(containerClass);
         for (let i = 0; i < runtimeArgs.length; i++) {
           container.setDyn(
-            "" + i,
+            i,
             runtimeArgs[i],
             new Token(TT.NUMBER, "" + i, i, 0),
           );

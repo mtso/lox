@@ -1,0 +1,58 @@
+class Object { }
+
+class List {
+  init() {
+    this._items = Object();
+    this._count = 0;
+  }
+  add(item) {
+    this._items.(this._count) = item;
+    this._count = this._count + 1;
+  }
+  get(i) { return this._items.(i); }
+  size() { return this._count; }
+  forEach(callback) { for (var i = 0; i < this._count; i = i + 1) callback(this._items.(i)); }
+  isEmpty() { return this.size() == 0; }
+  // Stack ADT.
+  push(item) { this.add(item); }
+  peek() { return this._items.(this._count - 1); }
+  pop() {
+    if (this._count <= 0) return nil;
+    this._count = this._count - 1;
+    var last = this._items.(this._count);
+    this._items.(this._count) = nil;
+    return last;
+  }
+}
+
+class Map {
+  init() {
+    this._items = Object();
+    this._count = 0;
+  }
+  set(key, value) {
+    if (this._items.(key) == nil and value != nil) this._count = this._count + 1;
+    if (this._items.(key) != nil and value == nil) this._count = this._count - 1;
+    this._items.(key) = value;
+  }
+  get(key) { return this._items.(key); }
+  size() { return this._count; }
+}
+
+fun expect(condition, message) {
+  if (condition) {
+    print("PASS : " + message);
+  } else {
+    print("FAIL : " + message);
+  }
+}
+
+var map = Map();
+var l1 = List();
+var l2 = List();
+map.set(l1, "l1");
+map.set(l2, "l2");
+expect(map.get(l1) == "l1", "l1 is retained");
+expect(map.get(l2) == "l2", "l2 is stored");
+expect(map.get(List()) == nil, "new instance not set");
+expect(map.get(l1) != map.get(l2), "l1 and l2 are two different references");

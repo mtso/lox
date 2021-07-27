@@ -14,6 +14,17 @@ class List {
   get(i) { return this._items.(i); }
   size() { return this._count; }
   forEach(callback) { for (var i = 0; i < this._count; i = i + 1) callback(this._items.(i)); }
+  isEmpty() { return this.size() == 0; }
+  // Stack ADT.
+  push(item) { this.add(item); }
+  peek() { return this._items.(this._count - 1); }
+  pop() {
+    if (this._count <= 0) return nil;
+    this._count = this._count - 1;
+    var last = this._items.(this._count);
+    this._items.(this._count) = nil;
+    return last;
+  }
 }
 
 class Map {
@@ -438,6 +449,22 @@ class Environment {
   define(name, value) {
     this.defines.set(name, true);
     this.values.set(name, value);
+  }
+
+  getAt(distance, name) {
+    return ok(this.ancestor(distance).values.get(name));
+  }
+
+  assignAt(distance, name, value) {
+    return ok(this.ancestor(distance).values.set(name.lexeme, value));
+  }
+
+  ancestor(distance) {
+    var environment = this;
+    for (var i = 0; i < distance; i = i + 1) {
+      environment = environment.enclosing;
+    }
+    return environment;
   }
 }
 
@@ -1126,12 +1153,160 @@ class Parser {
   }
 }
 
+var FunctionType = Object();
+FunctionType.NONE = "NONE";
+FunctionType.FUNCTION = "FUNCTION";
+
+class Resolver < Visitor {
+  init(interpreter) {
+    this.interpreter = interpreter;
+    this.scopes = List();
+    this.currentFunction = FunctionType.NONE;
+  }
+
+  visitBlockStmt(stmt) {
+    this.beginScope();
+    this.resolveStmts(stmt.statements);
+    this.endScope();
+  }
+
+  visitExpressionStmt(stmt) {
+    this.resolve(stmt.expression);
+  }
+
+  visitFunctionStmt(stmt) {
+    this.declare(stmt.name);
+    this.define(stmt.name);
+    this.resolveFunction(stmt, FunctionType.FUNCTION);
+  }
+
+  visitIfStmt(stmt) {
+    this.resolve(stmt.condition);
+    this.resolve(stmt.thenBranch);
+    if (nil != stmt.elseBranch) this.resolve(stmt.elseBranch);
+  }
+
+  visitPrintStmt(stmt) {
+    this.resolve(stmt.expression);
+  }
+
+  visitReturnStmt(stmt) {
+    if (this.currentFunction == FunctionType.NONE)
+      LOX.error(stmt.keyword, "Can't return from top-level code.");
+
+    if (nil != stmt.value) this.resolve(stmt.value);
+  }
+
+  visitVarStmt(stmt) {
+    this.declare(stmt.name);
+    if (nil != stmt.initializer) this.resolve(stmt.initializer);
+    this.define(stmt.name);
+  }
+
+  visitWhileStmt(stmt) {
+    this.resolve(stmt.condition);
+    this.resolve(stmt.body);
+  }
+
+  visitAssignExpr(expr) {
+    this.resolve(expr.value);
+    this.resolveLocal(expr, expr.name);
+  }
+
+  visitBinaryExpr(expr) {
+    this.resolve(expr.left);
+    this.resolve(expr.right);
+  }
+
+  visitCallExpr(expr) {
+    this.resolve(expr.callee);
+    for (var i = 0; i < expr.arguments.size(); i = i + 1) {
+      this.resolve(expr.arguments.get(i));
+    }
+  }
+
+  visitGroupingExpr(expr) {
+    this.resolve(expr.expression);
+  }
+
+  visitLiteralExpr(expr) {
+    // Nothing to do here.
+  }
+
+  visitLogicalExpr(expr) {
+    this.resolve(expr.left);
+    this.resolve(expr.right);
+  }
+
+  visitUnaryExpr(expr) {
+    this.resolve(expr.right);
+  }
+
+  visitVariableExpr(expr) {
+    if (!this.scopes.isEmpty() and this.scopes.peek().get(expr.name.lexeme) == false) {
+      LOX.error(expr.name, "Can't read local variable in its own initializer.");
+    }
+    this.resolveLocal(expr, expr.name);
+  }
+
+  resolveStmts(statements) {
+    statements.forEach(this.resolve);
+  }
+
+  resolve(stmt) {
+    stmt.accept(this);
+  }
+
+  resolveFunction(function, type) {
+    var enclosingFunction = this.currentFunction;
+    this.currentFunction = type;
+    this.beginScope();
+    for (var i = 0; i < function.params.size(); i = i + 1) {
+      this.declare(function.params.get(i));
+      this.define(function.params.get(i));
+    }
+    this.resolveStmts(function.body);
+    this.endScope();
+    this.currentFunction = enclosingFunction;
+  }
+
+  beginScope() {
+    this.scopes.push(Map());
+  }
+
+  endScope() {
+    this.scopes.pop();
+  }
+
+  declare(name) {
+    if (this.scopes.isEmpty()) return;
+    var scope = this.scopes.peek();
+    if (nil != scope.get(name.lexeme)) LOX.error(name, "Already a variable with this name in this scope.");
+    scope.set(name.lexeme, false);
+  }
+
+  define(name) {
+    if (this.scopes.isEmpty()) return;
+    this.scopes.peek().set(name.lexeme, true);
+  }
+
+  resolveLocal(expr, name) {
+    for (var i = this.scopes.size() - 1; i >= 0; i = i - 1) {
+      if (nil != this.scopes.get(i).get(name.lexeme)) {
+        this.interpreter.resolve(expr, this.scopes.size() - 1 - i);
+        return;
+      }
+    }
+  }
+}
+
 class Interpreter < Visitor {
   init() {
     this.DIGITS = Map();
     for (var i = 0; i < 10; i = i + 1) this.DIGITS.set(str(i), true);
     this.globals = Environment(nil);
     this.environment = this.globals;
+    this.locals = Map();
 
     class RtClock < LoxCallable {
       arity() { return 0; }
@@ -1154,6 +1329,10 @@ class Interpreter < Visitor {
 
   execute(stmt) {
     return stmt.accept(this);
+  }
+
+  resolve(expr, depth) {
+    this.locals.set(expr, depth);
   }
 
   executeBlock(statements, environment) {
@@ -1235,8 +1414,17 @@ class Interpreter < Visitor {
   visitAssignExpr(expr) {
     var value = this.evaluate(expr.value);
     if (!value.ok) return value;
-    var result = this.environment.assign(expr.name, value.value);
-    if (!result.ok) return result;
+
+    var distance = this.locals.get(expr);
+    if (distance != nil) {
+      var result = this.environment.assignAt(distance, expr.name, value.value);
+      if (!result.ok) return result;
+    } else {
+      var result = this.globals.assign(expr.name, value.value);
+      if (!result.ok) return result;
+    }
+    // var result = this.environment.assign(expr.name, value.value);
+    // if (!result.ok) return result;
     return value;
   }
 
@@ -1352,7 +1540,17 @@ class Interpreter < Visitor {
   }
 
   visitVariableExpr(expr) {
-    return this.environment.get(expr.name);
+    return this.lookupVariable(expr.name, expr);
+    // return this.environment.get(expr.name);
+  }
+
+  lookupVariable(name, expr) {
+    var distance = this.locals.get(expr);
+    if (nil != distance) {
+      return this.environment.getAt(distance, name.lexeme);
+    } else {
+      return this.globals.get(name);
+    }
   }
 
   checkNumberOperand(operator, operand) {
@@ -1415,6 +1613,11 @@ fun run(source) {
   var tokens = scanner.scanTokens();
   var parser = Parser(tokens);
   var statements = parser.parse();
+
+  if (LOX.hadError) return;
+
+  var resolver = Resolver(INTERPRETER);
+  resolver.resolveStmts(statements);
 
   if (LOX.hadError) return;
 
