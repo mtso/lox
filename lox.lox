@@ -87,6 +87,19 @@ class Binary {
     return "Binary";
   }
 }
+class Call {
+  init(callee, paren, arguments) {
+    this.callee = callee;
+    this.paren = paren;
+    this.arguments = arguments;
+  }
+  accept(visitor) {
+    return visitor.visitCallExpr(this);
+  }
+  getClassName() {
+    return "Call";
+  }
+}
 class Grouping {
   init(expression) {
     this.expression = expression;
@@ -185,6 +198,19 @@ class If {
     return "If";
   }
 }
+class Function {
+  init(name, params, body) {
+    this.name = name;
+    this.params = params;
+    this.body = body;
+  }
+  accept(visitor) {
+    return visitor.visitFunctionStmt(this);
+  }
+  getClassName() {
+    return "Function";
+  }
+}
 class Print {
   init(expression) {
     this.expression = expression;
@@ -194,6 +220,18 @@ class Print {
   }
   getClassName() {
     return "Print";
+  }
+}
+class Return {
+  init(keyword, value) {
+    this.keyword = keyword;
+    this.value = value;
+  }
+  accept(visitor) {
+    return visitor.visitReturnStmt(this);
+  }
+  getClassName() {
+    return "Return";
   }
 }
 class Var {
@@ -223,6 +261,7 @@ class While {
 class Visitor {
   visitAssignExpr(expr) { print("visitAssignExpr not implemented! " + str(this)); }
   visitBinaryExpr(expr) { print("visitBinaryExpr not implemented! " + str(this)); }
+  visitCallExpr(expr) { print("visitCallExpr not implemented! " + str(this)); }
   visitGroupingExpr(expr) { print("visitGroupingExpr not implemented! " + str(this)); }
   visitLiteralExpr(expr) { print("visitLiteralExpr not implemented! " + str(this)); }
   visitLogicalExpr(expr) { print("visitLogicalExpr not implemented! " + str(this)); }
@@ -231,7 +270,9 @@ class Visitor {
   visitBlockStmt(stmt) { print("visitBlockStmt not implemented! " + str(this)); }
   visitExpressionStmt(stmt) { print("visitExpressionStmt not implemented! " + str(this)); }
   visitIfStmt(stmt) { print("visitIfStmt not implemented! " + str(this)); }
+  visitFunctionStmt(stmt) { print("visitFunctionStmt not implemented! " + str(this)); }
   visitPrintStmt(stmt) { print("visitPrintStmt not implemented! " + str(this)); }
+  visitReturnStmt(stmt) { print("visitReturnStmt not implemented! " + str(this)); }
   visitVarStmt(stmt) { print("visitVarStmt not implemented! " + str(this)); }
   visitWhileStmt(stmt) { print("visitWhileStmt not implemented! " + str(this)); }
 }
@@ -305,6 +346,11 @@ class Result {
     this.ok = ok;
     this.value = value;
   }
+
+  ifOk(mapper) {
+    if (this.ok) return Result(true, mapper(this.value));
+    else return this;
+  }
 }
 
 class Error {
@@ -324,6 +370,13 @@ class RuntimeError < Error {
   init(token, message) {
     super.init("RuntimeError", message);
     this.token = token;
+  }
+}
+
+class ReturnState < Error {
+  init(value) {
+    super.init("ReturnState", nil);
+    this.value = value;
   }
 }
 
@@ -385,6 +438,50 @@ class Environment {
   define(name, value) {
     this.defines.set(name, true);
     this.values.set(name, value);
+  }
+}
+
+class LoxCallable {
+  arity() {
+    print("LoxCallable::arity(0) not implemented! " + str(this));
+  }
+  call(interpreter, arguments) {
+    print("LoxCallable::call(2) not implemented! " + str(this));
+  }
+  isCallable() { return true; }
+}
+
+class LoxFunction < LoxCallable {
+  init(declaration, closure) {
+    this.declaration = declaration;
+    this.closure = closure;
+  }
+
+  call(interpreter, arguments) {
+    var environment = Environment(this.closure);
+    for (var i = 0; i < this.declaration.params.size(); i = i + 1) {
+      environment.define(this.declaration.params.get(i).lexeme,
+          arguments.get(i));
+    }
+
+    var result = interpreter.executeBlock(this.declaration.body, environment);
+    if (!result.ok) {
+      var error = result.value;
+      if (error.code == "ReturnState") {
+        return ok(error.value);
+      } else {
+        return result;
+      }
+    }
+    return ok(nil);
+  }
+
+  arity() {
+    return this.declaration.params.size();
+  }
+
+  toString() {
+    return "<fn " + this.declaration.name.lexeme + ">";
   }
 }
 
@@ -584,6 +681,11 @@ class Parser {
   }
 
   declaration() {
+    if (this.match(TT.FUN)) {
+      var funDec = this.function("function");
+      if (funDec.ok) return funDec;
+      else return ok(this.synchronize());
+    }
     if (this.match(TT.VAR)) {
       var varDec = this.varDeclaration();
       if (varDec.ok) return varDec;
@@ -598,8 +700,10 @@ class Parser {
     if (this.match(TT.FOR)) return this.forStatement();
     if (this.match(TT.IF)) return this.ifStatement();
     if (this.match(TT.PRINT)) return this.printStatement();
+    if (this.match(TT.RETURN)) return this.returnStatement();
     if (this.match(TT.WHILE)) return this.whileStatement();
-    if (this.match(TT.LEFT_BRACE)) return this.blockStatement();
+    fun wrapStmts(statements) { return Block(statements); }
+    if (this.match(TT.LEFT_BRACE)) return this.block().ifOk(wrapStmts);
     return this.expressionStatement();
   }
 
@@ -694,6 +798,19 @@ class Parser {
     return ok(Print(value.value));
   }
 
+  returnStatement() {
+    var keyword = this.previous();
+    var value = nil;
+    if (!this.check(TT.SEMICOLON)) {
+      var expr = this.expression();
+      if (!expr.ok) return expr;
+      value = expr.value;
+    }
+    var result = this.consume(TT.SEMICOLON, "Expect ';' after return value.");
+    if (!result.ok) return result;
+    return ok(Return(keyword, value));
+  }
+
   varDeclaration() {
     var name = this.consume(TT.IDENTIFIER, "Expect variable name.");
     if (!name.ok) return name;
@@ -728,12 +845,58 @@ class Parser {
     return ok(Expression(expr.value));
   }
 
-  blockStatement() {
+  function(kind) {
+    var name = this.consume(TT.IDENTIFIER, "Expect " + kind + " name.");
+    if (!name.ok) return name; else name = name.value;
+
+    var result = this.consume(TT.LEFT_PAREN, "Expect '(' after " + kind + " name.");
+    if (!result.ok) return result;
+
+    var parameters = List();
+    if (!this.check(TT.RIGHT_PAREN)) {
+      var name = this.consume(TT.IDENTIFIER, "Expect parameter name.");
+      if (!name.ok) return name;
+      parameters.add(name.value);
+
+      while (this.match(TT.COMMA)) {
+        if (parameters.size() > 255) this.error(this.previous(), "Can't have more than 255 parameters.");
+
+        var name = this.consume(TT.IDENTIFIER, "Expect parameter name.");
+        if (!name.ok) return name;
+        parameters.add(name.value);
+      }
+    }
+
+    result = this.consume(TT.RIGHT_PAREN, "Expect ')' after parameters.");
+    if (!result.ok) return result;
+
+    result = this.consume(TT.LEFT_BRACE, "Expect '{' before " + kind + " body.");
+    if (!result.ok) return result;
+    var body = this.block();
+    if (!body.ok) return body;
+    return ok(Function(name, parameters, body.value));
+  }
+
+  block() {
     var statements = List();
     while (!this.check(TT.RIGHT_BRACE) and !this.isAtEnd()) {
       var decl = this.declaration();
       if (!decl.ok) return decl;
-      statements.add(decl.value);
+      if (nil != decl.value) statements.add(decl.value);
+    }
+    var result = this.consume(TT.RIGHT_BRACE, "Expect '}' after block.");
+    if (!result.ok) return result;
+    return ok(statements);
+  }
+
+  blockStatement() {
+    // var statements = this.block();
+    // if (!statements.ok) 
+    var statements = List();
+    while (!this.check(TT.RIGHT_BRACE) and !this.isAtEnd()) {
+      var decl = this.declaration();
+      if (!decl.ok) return decl;
+      if (nil != decl.value) statements.add(decl.value);
     }
     var result = this.consume(TT.RIGHT_BRACE, "Expect '}' after block.");
     if (!result.ok) return result;
@@ -758,7 +921,6 @@ class Parser {
     return expr;
   }
 
-  // change?
   orClause() {
     var expr = this.andClause();
     if (!expr.ok) return expr;
@@ -849,7 +1011,44 @@ class Parser {
       if (!right.ok) return right;
       return ok(Unary(operator, right.value));
     }
-    return this.primary();
+    return this.call();
+  }
+
+  finishCall(callee) {
+    var arguments = List();
+
+    if (!this.check(TT.RIGHT_PAREN)) {
+      var expr = this.expression();
+      if (!expr.ok) return expr;
+      arguments.add(expr.value);
+
+      while (this.match(TT.COMMA)) {
+        if (arguments.size() >= 255) {
+          this.error(this.previous(), "Can't have more than 255 arguments.");
+        }
+        var expr = this.expression();
+        if (!expr.ok) return expr;
+        arguments.add(expr.value);
+      }
+    }
+
+    var paren = this.consume(TT.RIGHT_PAREN, "Expect ')' after arguments.");
+    if (!paren.ok) return paren;
+    return ok(Call(callee, paren.value, arguments));
+  }
+
+  call() {
+    var expr = this.primary();
+    if (!expr.ok) return expr;
+    expr = expr.value;
+
+    while (this.match(TT.LEFT_PAREN)) {
+      var result = this.finishCall(expr);
+      if (!result.ok) return result;
+      expr = result.value;
+    }
+
+    return ok(expr);
   }
 
   primary() {
@@ -931,7 +1130,15 @@ class Interpreter < Visitor {
   init() {
     this.DIGITS = Map();
     for (var i = 0; i < 10; i = i + 1) this.DIGITS.set(str(i), true);
-    this.environment = Environment(nil);
+    this.globals = Environment(nil);
+    this.environment = this.globals;
+
+    class RtClock < LoxCallable {
+      arity() { return 0; }
+      call(interpreter, arguments) { return clock(); }
+      toString() { return "<native fn>"; }
+    }
+    this.globals.define("clock", RtClock());
   }
 
   interpret(statements) {
@@ -971,6 +1178,12 @@ class Interpreter < Visitor {
     return this.evaluate(stmt.expression);
   }
 
+  visitFunctionStmt(stmt) {
+    var function = LoxFunction(stmt, this.environment);
+    this.environment.define(stmt.name.lexeme, function);
+    return ok(nil);
+  }
+
   visitIfStmt(stmt) {
     var condition = this.evaluate(stmt.condition);
     if (!condition.ok) return condition;
@@ -984,6 +1197,16 @@ class Interpreter < Visitor {
     if (!value.ok) return value;
     print(this.stringify(value.value));
     return ok(nil);
+  }
+
+  visitReturnStmt(stmt) {
+    var value = nil;
+    if (nil != stmt.value) {
+      var result = this.evaluate(stmt.value);
+      if (!result.ok) return result;
+      value = result.value;
+    }
+    return err(ReturnState(value));
   }
 
   visitVarStmt(stmt) {
@@ -1077,6 +1300,22 @@ class Interpreter < Visitor {
     }
     // Unreachable.
     return err(nil);
+  }
+
+  visitCallExpr(expr) {
+    var callee = this.evaluate(expr.callee);
+    if (!callee.ok) return callee; else callee = callee.value;
+
+    var arguments = List();
+    for (var i = 0; i < expr.arguments.size(); i = i + 1) {
+      var argument = this.evaluate(expr.arguments.get(i));
+      if (!argument.ok) return argument;
+      arguments.add(argument.value);
+    }
+
+    if (callee.("isCallable") == nil) return err(RuntimeError(expr.paren, "Can only call functions and classes."));
+
+    return callee.call(this, arguments);
   }
 
   visitGroupingExpr(expr) {

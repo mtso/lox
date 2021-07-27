@@ -94,6 +94,7 @@ fun defineVisitor(exprTypes, stmtTypes) {
   var exprTypes = List();
   exprTypes.add("Assign : name, value");
   exprTypes.add("Binary : left, operator, right");
+  exprTypes.add("Call : callee, paren, arguments");
   exprTypes.add("Grouping : expression");
   exprTypes.add("Literal : value");
   exprTypes.add("Logical : left, operator, right");
@@ -104,7 +105,9 @@ fun defineVisitor(exprTypes, stmtTypes) {
   stmtTypes.add("Block : statements");
   stmtTypes.add("Expression : expression");
   stmtTypes.add("If : condition, thenBranch, elseBranch");
+  stmtTypes.add("Function : name, params, body");
   stmtTypes.add("Print : expression");
+  stmtTypes.add("Return : keyword, value");
   stmtTypes.add("Var : name, initializer");
   stmtTypes.add("While : condition, body");
 
