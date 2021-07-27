@@ -49,9 +49,9 @@ fun split(hay, needle) {
   var end = 0;
   var count = 0;
   for (var i = 0; i < len - needleLen + 1; i = i + 1) {
-    var potential = substr(hay, i, i + needleLen);
+    var potential = strslice(hay, i, i + needleLen);
     if (potential == needle) {
-      result.(count) = substr(hay, start, end);
+      result.(count) = strslice(hay, start, end);
       start = end + needleLen;
       end = start;
       i = i + needleLen - 1;
@@ -60,7 +60,7 @@ fun split(hay, needle) {
       end = end + 1;
     }
   }
-  result.(count) = substr(hay, start, len);
+  result.(count) = strslice(hay, start, len);
   result.len = count + 1;
   return result;
 }
@@ -415,12 +415,12 @@ class Lox {
   }
 
   runtimeError(error) {
-    print(error.message + "\n[line " + str(error.token.line) + "]");
+    eprint(error.message + "\n[line " + str(error.token.line) + "]");
     this.hadRuntimeError = true;
   }
 
   report(line, where, message) {
-    print("[line " + str(line) + "] Error" + str(where) + ": " + message);
+    eprint("[line " + str(line) + "] Error" + str(where) + ": " + message);
     this.hadError = true;
   }
 }
@@ -546,7 +546,7 @@ class Scanner {
     this.ALPHAS = Map();
     var ALPHASET = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_";
     for (var i = 0; i < strlen(ALPHASET); i = i + 1) {
-      this.ALPHAS.set(substr(ALPHASET, i, i + 1), true);
+      this.ALPHAS.set(strslice(ALPHASET, i, i + 1), true);
     }
   }
 
@@ -609,7 +609,7 @@ class Scanner {
   identifier() {
     while (this.isAlphaNumeric(this.peek())) this.advance();
 
-    var text = substr(this.source, this.start, this.current);
+    var text = strslice(this.source, this.start, this.current);
     var type = this.keywords.get(text);
     if (nil == type) type = TT.IDENTIFIER;
     this.addToken(type);
@@ -622,7 +622,7 @@ class Scanner {
     }
     if (this.isAtEnd()) return LOX.error(this.line, "Unterminated string.");
     this.advance();
-    var value = substr(this.source, this.start + 1, this.current - 1);
+    var value = strslice(this.source, this.start + 1, this.current - 1);
     this.addTokenLiteral(TT.STRING, value);
   }
 
@@ -632,24 +632,24 @@ class Scanner {
       this.advance();
       while (this.isDigit(this.peek())) this.advance();
     }
-    this.addTokenLiteral(TT.NUMBER, parse_float(substr(this.source, this.start, this.current)));
+    this.addTokenLiteral(TT.NUMBER, parse_float(strslice(this.source, this.start, this.current)));
   }
 
   match(expected) {
     if (this.isAtEnd()) return false;
-    if (substr(this.source, this.current, this.current + 1) != expected) return false;
+    if (strslice(this.source, this.current, this.current + 1) != expected) return false;
     this.current = this.current + 1;
     return true;
   }
 
   peek() {
     if (this.isAtEnd()) return "\0";
-    return substr(this.source, this.current, this.current + 1);
+    return strslice(this.source, this.current, this.current + 1);
   }
 
   peekNext() {
     if (this.current + 1 >= strlen(this.source)) return "\0";
-    return substr(this.source, this.current + 1, this.current + 2);
+    return strslice(this.source, this.current + 1, this.current + 2);
   }
 
   isAlpha(c) {
@@ -670,7 +670,7 @@ class Scanner {
 
   advance() {
     this.current = this.current + 1;
-    return substr(this.source, this.current - 1, this.current);
+    return strslice(this.source, this.current - 1, this.current);
   }
 
   addToken(type) {
@@ -678,7 +678,7 @@ class Scanner {
   }
 
   addTokenLiteral(type, literal) {
-    var text = substr(this.source, this.start, this.current);
+    var text = strslice(this.source, this.start, this.current);
     this.tokens.add(Token(type, text, literal, this.line));
   }
 }
@@ -1572,7 +1572,7 @@ class Interpreter < Visitor {
     var seenDot = false;
     var seenDigit = false;
     for (var i = 0; i < strlen(potential); i = i + 1) {
-      var digit = substr(potential, i, i + 1);
+      var digit = strslice(potential, i, i + 1);
       if (!(digit == "-" and i == 0)) {
         if (digit == ".") {
           if (seenDot) return false;

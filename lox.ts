@@ -959,7 +959,7 @@ class Interpreter implements expr.Visitor<any>, stmt.Visitor<void> {
         return v;
       }
     }
-    class RtSubstr extends LoxCallable {
+    class RtStrslice extends LoxCallable {
       arity(): number {
         return 3;
       }
@@ -1039,15 +1039,24 @@ class Interpreter implements expr.Visitor<any>, stmt.Visitor<void> {
         Deno.exit(code);
       }
     }
+    class RtEprint extends LoxCallable {
+      arity(): number {
+        return 1;
+      }
+      call(interpreter: Interpreter, args: any[]): any {
+        console.error(args[0]);
+      }
+    }
 
     this.globals.define("clock", new RtClock());
     this.globals.define("str", new RtStr());
-    this.globals.define("substr", new RtSubstr());
+    this.globals.define("strslice", new RtStrslice());
     this.globals.define("strlen", new RtStrlen());
     this.globals.define("readfile", new RtReadfile());
     this.globals.define("parse_float", new RtParseFloat());
     this.globals.define("process_args", new RtProcessArgs());
     this.globals.define("process_exit", new RtProcessExit());
+    this.globals.define("eprint", new RtEprint());
   }
 
   interpret(statements: Stmt[]) {
@@ -1216,7 +1225,6 @@ class Interpreter implements expr.Visitor<any>, stmt.Visitor<void> {
         return (left as number) - (right as number);
       case TT.PLUS:
         if (typeof left === "number" && typeof right === "number") {
-          // if (left instanceof Number && right instanceof Number) {
           return (left as number) + (right as number);
         }
         if (typeof left === "string" && typeof right === "string") {

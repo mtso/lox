@@ -1,8 +1,8 @@
 var str = "hello world";
-print(substr(str, 0, 5));
+print(strslice(str, 0, 5));
 print(strlen(str));
-print(substr(str, strlen(str) - 5, strlen(str)));
-print(substr(str, 0, 5) == "hello");
+print(strslice(str, strlen(str) - 5, strlen(str)));
+print(strslice(str, 0, 5) == "hello");
 
 var path = "test_func.lox";
 print(readfile(path));
