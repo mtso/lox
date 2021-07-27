@@ -8,18 +8,3 @@ print a;
   print a;
 }
 print a;
-if (a == 4) {
-  print("a is 4");
-} else {
-  print("a is not 4");
-}
-print(nil or "yes");
-print("2" and 5);
-for (var i = 0; i < 5; i = i + 1) {
-  print("loop");
-  print(i);
-}
-var j = 5;
-while (j > 0) print j = j - 1;
-print 3.5;
-print 3.0;

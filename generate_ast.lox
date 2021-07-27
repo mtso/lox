@@ -42,7 +42,7 @@ fun split(hay, needle) {
 
 // end utils
 
-fun defineType(className, fields) {
+fun defineType(baseName, className, fields) {
   print("class " + className + " {");
   // constructor
   print("  init(" + fields + ") {");
@@ -52,7 +52,7 @@ fun defineType(className, fields) {
   }
   print("  }");
   // accept fn
-  print("  accept(visitor) {\n    return visitor.visit" + className + "Expr(this);\n  }");  
+  print("  accept(visitor) {\n    return visitor.visit" + className + baseName + "(this);\n  }");  
 
   print("  getClassName() {\n    return \"" + className + "\";\n  }");
   print("}");
@@ -66,7 +66,7 @@ fun defineAst(baseName, types) {
 }");
   fun printType(type) {
     var parts = split(type, " : ");
-    defineType(parts.(0), parts.(1));
+    defineType(baseName, parts.(0), parts.(1));
   }
   types.forEach(printType);
 }
@@ -79,21 +79,36 @@ fun defineVisitor(exprTypes, stmtTypes) {
     print("  " + name + "(expr) { print(\"" + name + " not implemented! \" + str(this)); }");
   }
   exprTypes.forEach(printExpr);
+  fun printStmt(type) {
+    var parts = split(type, " : ");
+    var name = "visit" + parts.(0) + "Stmt";
+    print("  " + name + "(stmt) { print(\"" + name + " not implemented! \" + str(this)); }");
+  }
+  stmtTypes.forEach(printStmt);
   print("}");
 }
 
 {
-  // Usage: deno run --allow-read lox.ts generate_ast.lox
+  // Usage: deno run --allow-read lox.ts generate_ast.lox | pbcopy
 
   var exprTypes = List();
+  exprTypes.add("Assign : name, value");
   exprTypes.add("Binary : left, operator, right");
   exprTypes.add("Grouping : expression");
   exprTypes.add("Literal : value");
   exprTypes.add("Unary : operator, right");
+  exprTypes.add("Variable : name");
+
+  var stmtTypes = List();
+  stmtTypes.add("Block : statements");
+  stmtTypes.add("Expression : expression");
+  stmtTypes.add("Print : expression");
+  stmtTypes.add("Var : name, initializer");
 
   print("// begin ast");
   defineAst("Expr", exprTypes);
+  defineAst("Stmt", stmtTypes);
 
-  defineVisitor(exprTypes, exprTypes);
+  defineVisitor(exprTypes, stmtTypes);
   print("// end ast");
 }

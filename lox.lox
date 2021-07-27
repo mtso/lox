@@ -62,6 +62,18 @@ class Expr {
     print("Not implemented!");
   }
 }
+class Assign {
+  init(name, value) {
+    this.name = name;
+    this.value = value;
+  }
+  accept(visitor) {
+    return visitor.visitAssignExpr(this);
+  }
+  getClassName() {
+    return "Assign";
+  }
+}
 class Binary {
   init(left, operator, right) {
     this.left = left;
@@ -109,11 +121,78 @@ class Unary {
     return "Unary";
   }
 }
+class Variable {
+  init(name) {
+    this.name = name;
+  }
+  accept(visitor) {
+    return visitor.visitVariableExpr(this);
+  }
+  getClassName() {
+    return "Variable";
+  }
+}
+class Stmt {
+  accept(visitor) {
+    print("Not implemented!");
+  }
+}
+class Block {
+  init(statements) {
+    this.statements = statements;
+  }
+  accept(visitor) {
+    return visitor.visitBlockStmt(this);
+  }
+  getClassName() {
+    return "Block";
+  }
+}
+class Expression {
+  init(expression) {
+    this.expression = expression;
+  }
+  accept(visitor) {
+    return visitor.visitExpressionStmt(this);
+  }
+  getClassName() {
+    return "Expression";
+  }
+}
+class Print {
+  init(expression) {
+    this.expression = expression;
+  }
+  accept(visitor) {
+    return visitor.visitPrintStmt(this);
+  }
+  getClassName() {
+    return "Print";
+  }
+}
+class Var {
+  init(name, initializer) {
+    this.name = name;
+    this.initializer = initializer;
+  }
+  accept(visitor) {
+    return visitor.visitVarStmt(this);
+  }
+  getClassName() {
+    return "Var";
+  }
+}
 class Visitor {
+  visitAssignExpr(expr) { print("visitAssignExpr not implemented! " + str(this)); }
   visitBinaryExpr(expr) { print("visitBinaryExpr not implemented! " + str(this)); }
   visitGroupingExpr(expr) { print("visitGroupingExpr not implemented! " + str(this)); }
   visitLiteralExpr(expr) { print("visitLiteralExpr not implemented! " + str(this)); }
   visitUnaryExpr(expr) { print("visitUnaryExpr not implemented! " + str(this)); }
+  visitVariableExpr(expr) { print("visitVariableExpr not implemented! " + str(this)); }
+  visitBlockStmt(stmt) { print("visitBlockStmt not implemented! " + str(this)); }
+  visitExpressionStmt(stmt) { print("visitExpressionStmt not implemented! " + str(this)); }
+  visitPrintStmt(stmt) { print("visitPrintStmt not implemented! " + str(this)); }
+  visitVarStmt(stmt) { print("visitVarStmt not implemented! " + str(this)); }
 }
 // end ast
 
@@ -243,6 +322,31 @@ class Lox {
 
 var LOX = Lox();
 
+class Environment {
+  init(enclosing) {
+    this.enclosing = enclosing;
+    this.values = Map();
+    this.defines = Map();
+  }
+
+  get(name) {
+    if (this.defines.get(name.lexeme) == true) return ok(this.values.get(name.lexeme));
+    if (nil != this.enclosing) return this.enclosing.get(name);
+    return err(RuntimeError(name, "Undefined variable '" + name.lexeme + "'."));
+  }
+
+  assign(name, value) {
+    if (this.defines.get(name.lexeme) == true) return ok(this.values.set(name.lexeme, value));
+    if (nil != this.enclosing) return this.enclosing.assign(name, value);
+    return err(RuntimeError(name, "Undefined variable '" + name.lexeme + "'."));
+  }
+
+  define(name, value) {
+    this.defines.set(name, true);
+    this.values.set(name, value);
+  }
+}
+
 class Scanner {
   init(source) {
     this.source = source;
@@ -342,7 +446,7 @@ class Scanner {
 
     var text = substr(this.source, this.start, this.current);
     var type = this.keywords.get(text);
-    if (nil != type) type = TT.IDENTIFIER;
+    if (nil == type) type = TT.IDENTIFIER;
     this.addToken(type);
   }
 
@@ -421,19 +525,98 @@ class Parser {
   }
 
   parse() {
-    var result = this.expression();
-    if (!result.ok) {
-      if (result.value.code == "ParseError") {
-        return nil;
+    var statements = List();
+    while (!this.isAtEnd()) {
+      var declaration = this.declaration();
+      if (declaration.ok) {
+        statements.add(declaration.value);
       } else {
-        print("Unrecognized error at parse(): " + str(result.value));
+        // Skip parse error.
+        // Assume LOX.hadError is set.
       }
     }
-    return result.value;
+    return statements;
   }
 
   expression() {
-    return this.equality();
+    return this.assignment();
+  }
+
+  declaration() {
+    if (this.match(TT.VAR)) {
+      var varDec = this.varDeclaration();
+      if (varDec.ok) return varDec;
+      else return ok(this.synchronize());
+    }
+    var stmt = this.statement();
+    if (stmt.ok) return stmt;
+    else return ok(this.synchronize());
+  }
+
+  statement() {
+    if (this.match(TT.PRINT)) return this.printStatement();
+    if (this.match(TT.LEFT_BRACE)) return this.blockStatement();
+    return this.expressionStatement();
+  }
+
+  printStatement() {
+    var value = this.expression();
+    if (!value.ok) return value;
+    var result = this.consume(TT.SEMICOLON, "Expect ';' after value.");
+    if (!result.ok) return result;
+    return ok(Print(value.value));
+  }
+
+  varDeclaration() {
+    var name = this.consume(TT.IDENTIFIER, "Expect variable name.");
+    if (!name.ok) return name;
+    var initializer = nil;
+    if (this.match(TT.EQUAL)) {
+      var expression = this.expression();
+      if (!expression.ok) return expression;
+      initializer = expression.value;
+    }
+    var result = this.consume(TT.SEMICOLON, "Expect ';' after variable declaration.");
+    if (!result.ok) return result;
+    return ok(Var(name.value, initializer));
+  }
+
+  expressionStatement() {
+    var expr = this.expression();
+    if (!expr.ok) return expr;
+    var result = this.consume(TT.SEMICOLON, "Expect ';' after expression.");
+    if (!result.ok) return result;
+    return ok(Expression(expr.value));
+  }
+
+  blockStatement() {
+    var statements = List();
+    while (!this.check(TT.RIGHT_BRACE) and !this.isAtEnd()) {
+      var decl = this.declaration();
+      if (!decl.ok) return decl;
+      statements.add(decl.value);
+    }
+    var result = this.consume(TT.RIGHT_BRACE, "Expect '}' after block.");
+    if (!result.ok) return result;
+    return ok(Block(statements));
+  }
+
+  assignment() {
+    var expr = this.equality();
+    if (!expr.ok) return expr;
+    if (this.match(TT.EQUAL))  {
+      var equals = this.previous();
+      var value = this.assignment();
+      if (!value.ok) return value;
+
+      if (expr.value.getClassName() == "Variable") {
+        var name = expr.value.name;
+        return ok(Assign(name, value.value));
+      } else {
+        this.error(equals, "Invalid assignment target.");
+      }
+    }
+    return expr;
   }
 
   equality() {
@@ -506,6 +689,7 @@ class Parser {
     if (this.match(TT.TRUE)) return ok(Literal(true));
     if (this.match(TT.NIL)) return ok(Literal(nil));
     if (this.match(TT.NUMBER) or this.match(TT.STRING)) return ok(Literal(this.previous().literal));
+    if (this.match(TT.IDENTIFIER)) return ok(Variable(this.previous()));
     if (this.match(TT.LEFT_PAREN)) {
       var expr = this.expression();
       if (!expr.ok) return expr;
@@ -524,9 +708,10 @@ class Parser {
     return false;
   }
 
+  // NOTE! returns Result
   consume(type, message) {
-    if (this.check(type)) return this.advance();
-    return Result(false, this.error(this.peek(), message));
+    if (this.check(type)) return ok(this.advance());
+    return err(this.error(this.peek(), message));
   }
 
   check(type) {
@@ -577,18 +762,14 @@ class Parser {
 class Interpreter < Visitor {
   init() {
     this.DIGITS = Map();
-    for (var i = 0; i < 10; i = i + 1) {
-      this.DIGITS.set(str(i), true);
-    }
+    for (var i = 0; i < 10; i = i + 1) this.DIGITS.set(str(i), true);
+    this.environment = Environment(nil);
   }
 
-  interpret(expression) {
-    var result = this.evaluate(expression);
-    if (result.ok) {
-      var value = result.value;
-      print(this.stringify(value));
-    } else {
-      LOX.runtimeError(result.value);
+  interpret(statements) {
+    for (var i = 0; i < statements.size(); i = i + 1) {
+      var result = this.execute(statements.get(i));
+      if (!result.ok) return LOX.runtimeError(result.value);
     }
   }
 
@@ -596,13 +777,63 @@ class Interpreter < Visitor {
     return expr.accept(this);
   }
 
+  execute(stmt) {
+    return stmt.accept(this);
+  }
+
+  executeBlock(statements, environment) {
+    var previous = this.environment;
+    this.environment = environment;
+    for (var i = 0; i < statements.size(); i = i + 1) {
+      var result = this.execute(statements.get(i));
+      if (!result.ok) {
+        this.environment = previous;
+        return result;
+      }
+    }
+    this.environment = previous;
+    return ok(nil);
+  }
+
+  visitBlockStmt(stmt) {
+    return this.executeBlock(stmt.statements, Environment(this.environment));
+  }
+
+  visitExpressionStmt(stmt) {
+    return this.evaluate(stmt.expression);
+  }
+
+  visitPrintStmt(stmt) {
+    var value = this.evaluate(stmt.expression);
+    if (!value.ok) return value;
+    print(this.stringify(value.value));
+    return ok(nil);
+  }
+
+  visitVarStmt(stmt) {
+    var value = nil;
+    if (nil != stmt.initializer) {
+      var result = this.evaluate(stmt.initializer);
+      if (!result.ok) return result;
+      value = result.value;
+    }
+    this.environment.define(stmt.name.lexeme, value);
+    return ok(nil);
+  }
+
+  visitAssignExpr(expr) {
+    var value = this.evaluate(expr.value);
+    if (!value.ok) return value;
+    var result = this.environment.assign(expr.name, value.value);
+    if (!result.ok) return result;
+    return value;
+  }
+
   visitBinaryExpr(expr) {
     var left = this.evaluate(expr.left);
     if (!left.ok) return left;
     var right = this.evaluate(expr.right);
     if (!right.ok) return right;
-
-    // print("visitB " + str(expr.operator.type) + " " + str(left.value) + " " + str(right.value));
 
     if (expr.operator.type == TT.BANG_EQUAL) {
       return ok(!this.isEqual(left.value, right.value));
@@ -682,6 +913,10 @@ class Interpreter < Visitor {
     return err(nil);
   }
 
+  visitVariableExpr(expr) {
+    return this.environment.get(expr.name);
+  }
+
   checkNumberOperand(operator, operand) {
     if (this.isNumber(operand)) return ok(nil);
     return err(RuntimeError(operator, "Operand must be a number."));
@@ -743,15 +978,11 @@ fun run(source) {
   var scanner = Scanner(source);
   var tokens = scanner.scanTokens();
   var parser = Parser(tokens);
-  var expression = parser.parse();
+  var statements = parser.parse();
 
   if (LOX.hadError) return;
 
-  INTERPRETER.interpret(expression);
-
-  // for (var i = 0; i < tokens.size(); i = i + 1) {
-  //   print(tokens.get(i).toString());
-  // }
+  INTERPRETER.interpret(statements);
 }
 
 fun runFile(filename) {
