@@ -1,3 +1,5 @@
+// begin utils
+
 class Object { }
 
 class List {
@@ -11,6 +13,7 @@ class List {
   }
   get(i) { return this._items.(i); }
   size() { return this._count; }
+  forEach(callback) { for (var i = 0; i < this._count; i = i + 1) callback(this._items.(i)); }
 }
 
 class Map {
@@ -27,12 +30,92 @@ class Map {
   size() { return this._count; }
 }
 
-class Result {
-  init(ok, value) {
-    this.ok = ok;
-    this.value = value;
+fun split(hay, needle) {
+  var needleLen = strlen(needle);
+  var len = strlen(hay);
+  var result = Object();
+  var start = 0;
+  var end = 0;
+  var count = 0;
+  for (var i = 0; i < len - needleLen + 1; i = i + 1) {
+    var potential = substr(hay, i, i + needleLen);
+    if (potential == needle) {
+      result.(count) = substr(hay, start, end);
+      start = end + needleLen;
+      end = start;
+      i = i + needleLen - 1;
+      count = count + 1;
+    } else {
+      end = end + 1;
+    }
+  }
+  result.(count) = substr(hay, start, len);
+  result.len = count + 1;
+  return result;
+}
+
+// end utils
+
+// begin ast
+class Expr {
+  accept(visitor) {
+    print("Not implemented!");
   }
 }
+class Binary {
+  init(left, operator, right) {
+    this.left = left;
+    this.operator = operator;
+    this.right = right;
+  }
+  accept(visitor) {
+    return visitor.visitBinaryExpr(this);
+  }
+  getClassName() {
+    return "Binary";
+  }
+}
+class Grouping {
+  init(expression) {
+    this.expression = expression;
+  }
+  accept(visitor) {
+    return visitor.visitGroupingExpr(this);
+  }
+  getClassName() {
+    return "Grouping";
+  }
+}
+class Literal {
+  init(value) {
+    this.value = value;
+  }
+  accept(visitor) {
+    return visitor.visitLiteralExpr(this);
+  }
+  getClassName() {
+    return "Literal";
+  }
+}
+class Unary {
+  init(operator, right) {
+    this.operator = operator;
+    this.right = right;
+  }
+  accept(visitor) {
+    return visitor.visitUnaryExpr(this);
+  }
+  getClassName() {
+    return "Unary";
+  }
+}
+class Visitor {
+  visitBinaryExpr(expr) { print("visitBinaryExpr not implemented! " + str(this)); }
+  visitGroupingExpr(expr) { print("visitGroupingExpr not implemented! " + str(this)); }
+  visitLiteralExpr(expr) { print("visitLiteralExpr not implemented! " + str(this)); }
+  visitUnaryExpr(expr) { print("visitUnaryExpr not implemented! " + str(this)); }
+}
+// end ast
 
 class TokenType {
   init() {
@@ -93,20 +176,72 @@ class Token {
   }
 
   toString() {
-    return this.type + " '" + this.lexeme + "' " + str(this.literal);
+    return str(this.type) + " '" + str(this.lexeme) + "' " + str(this.literal);
   }
 }
 
-var DIGITS = Map();
-for (var i = 0; i < 10; i = i + 1) {
-  DIGITS.set(str(i), true);
+class Result {
+  init(ok, value) {
+    this.ok = ok;
+    this.value = value;
+  }
 }
 
-var ALPHAS = Map();
-var ALPHASET = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_";
-for (var i = 0; i < strlen(ALPHASET); i = i + 1) {
-  ALPHAS.set(substr(ALPHASET, i, i + 1), true);
+class Error {
+  init(code, message) {
+    this.code = code;
+    this.message = message;
+  }
 }
+
+class ParseError < Error {
+  init() {
+    super.init("ParseError", nil);
+  }
+}
+
+class RuntimeError < Error {
+  init(token, message) {
+    super.init("RuntimeError", message);
+    this.token = token;
+  }
+}
+
+fun ok(value) {
+  return Result(true, value);
+}
+
+fun err(value) {
+  return Result(false, value);
+}
+
+class Lox {
+  init() {
+    this.hadError = false;
+    this.hadRuntimeError = false;
+  }
+
+  error(line, message) {
+    this.report(line, "", message);
+  }
+
+  errorToken(token, message) {
+    if (token.type == TT.EOF) this.report(token.line, " at end", message);
+    else this.report(token.line, " at '" + token.lexeme + "'", message);
+  }
+
+  runtimeError(error) {
+    print(error.message + "\n[line " + str(error.token.line) + "]");
+    this.hadRuntimeError = true;
+  }
+
+  report(line, where, message) {
+    print("[line " + str(line) + "] Error" + str(where) + ": " + message);
+    this.hadError = true;
+  }
+}
+
+var LOX = Lox();
 
 class Scanner {
   init(source) {
@@ -133,6 +268,17 @@ class Scanner {
     this.keywords.set("true",   TT.TRUE);
     this.keywords.set("var",    TT.VAR);
     this.keywords.set("while",  TT.WHILE);
+
+    this.DIGITS = Map();
+    for (var i = 0; i < 10; i = i + 1) {
+      this.DIGITS.set(str(i), true);
+    }
+
+    this.ALPHAS = Map();
+    var ALPHASET = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_";
+    for (var i = 0; i < strlen(ALPHASET); i = i + 1) {
+      this.ALPHAS.set(substr(ALPHASET, i, i + 1), true);
+    }
   }
 
   scanTokens() {
@@ -238,7 +384,7 @@ class Scanner {
   }
 
   isAlpha(c) {
-    return !!ALPHAS.get(c);
+    return !!this.ALPHAS.get(c);
   }
 
   isAlphaNumeric(c) {
@@ -246,7 +392,7 @@ class Scanner {
   }
 
   isDigit(c) {
-    return !!DIGITS.get(str(c));
+    return !!this.DIGITS.get(str(c));
   }
 
   isAtEnd() {
@@ -268,33 +414,352 @@ class Scanner {
   }
 }
 
-class Lox {
-  init() {
-    this.hadError = false;
+class Parser {
+  init(tokens) {
+    this.tokens = tokens;
+    this.current = 0;
   }
 
-  error(line, message) {
-    this.report(line, "", message);
+  parse() {
+    var result = this.expression();
+    if (!result.ok) {
+      if (result.value.code == "ParseError") {
+        return nil;
+      } else {
+        print("Unrecognized error at parse(): " + str(result.value));
+      }
+    }
+    return result.value;
   }
 
-  report(line, where, message) {
-    print("[line " + str(line) + "] Error" + str(where) + ": " + message);
+  expression() {
+    return this.equality();
+  }
+
+  equality() {
+    var expr = this.comparison();
+    if (!expr.ok) return expr;
+    expr = expr.value;
+    while (this.match(TT.BANG_EQUAL) or this.match(TT.EQUAL_EQUAL)) {
+      var operator = this.previous();
+      var right = this.comparison();
+      if (!right.ok) return right;
+      expr = Binary(expr, operator, right.value);
+    }
+    return ok(expr);
+  }
+
+  comparison() {
+    var expr = this.term();
+    if (!expr.ok) return expr;
+    expr = expr.value;
+    while (this.match(TT.GREATER)
+        or this.match(TT.GREATER_EQUAL)
+        or this.match(TT.LESS)
+        or this.match(TT.LESS_EQUAL)) {
+      var operator = this.previous();
+      var right = this.term();
+      if (!right.ok) return right;
+      expr = Binary(expr, operator, right.value);
+    }
+    return ok(expr);
+  }
+
+  term() {
+    var expr = this.factor();
+    if (!expr.ok) return expr;
+    expr = expr.value;
+    while (this.match(TT.MINUS) or this.match(TT.PLUS)) {
+      var operator = this.previous();
+      var right = this.factor();
+      if (!right.ok) return right;
+      expr = Binary(expr, operator, right.value);
+    }
+    return ok(expr);
+  }
+
+  factor() {
+    var expr = this.unary();
+    if (!expr.ok) return expr;
+    expr = expr.value;
+    while (this.match(TT.SLASH) or this.match(TT.STAR)) {
+      var operator = this.previous();
+      var right = this.unary();
+      if (!right.ok) return right;
+      expr = Binary(expr, operator, right.value);
+    }
+    return ok(expr);
+  }
+
+  unary() {
+    while (this.match(TT.BANG) or this.match(TT.MINUS)) {
+      var operator = this.previous();
+      var right = this.unary();
+      if (!right.ok) return right;
+      return ok(Unary(operator, right.value));
+    }
+    return this.primary();
+  }
+
+  primary() {
+    if (this.match(TT.FALSE)) return ok(Literal(false));
+    if (this.match(TT.TRUE)) return ok(Literal(true));
+    if (this.match(TT.NIL)) return ok(Literal(nil));
+    if (this.match(TT.NUMBER) or this.match(TT.STRING)) return ok(Literal(this.previous().literal));
+    if (this.match(TT.LEFT_PAREN)) {
+      var expr = this.expression();
+      if (!expr.ok) return expr;
+      var result = this.consume(TT.RIGHT_PAREN, "Expect ')' after expression.");
+      if (!result.ok) return result;
+      return ok(Grouping(expr.value));
+    }
+    return err(this.error(this.peek(), "Expect expression."));
+  }
+
+  match(type) {
+    if (this.check(type)) {
+      this.advance();
+      return true;
+    }
+    return false;
+  }
+
+  consume(type, message) {
+    if (this.check(type)) return this.advance();
+    return Result(false, this.error(this.peek(), message));
+  }
+
+  check(type) {
+    if (this.isAtEnd()) return false;
+    return this.peek().type == type;
+  }
+
+  advance() {
+    if (!this.isAtEnd()) this.current = this.current + 1;
+    return this.previous();
+  }
+
+  isAtEnd() {
+    return this.peek().type == TT.EOF;
+  }
+
+  peek() {
+    return this.tokens.get(this.current);
+  }
+
+  previous() {
+    return this.tokens.get(this.current - 1);
+  }
+
+  error(token, message) {
+    LOX.errorToken(token, message);
+    return ParseError();
+  }
+
+  synchronize() {
+    this.advance();
+    while (!this.isAtEnd()) {
+      if (this.previous().type == TT.SEMICOLON) return;
+      var type = this.peek().type;
+      if (type == TT.CLASS
+        or type == TT.FUN
+        or type == TT.VAR
+        or type == TT.FOR
+        or type == TT.IF
+        or type == TT.WHILE
+        or type == TT.PRINT
+        or type == TT.RETURN) return;
+      this.advance();
+    }
   }
 }
 
-var LOX = Lox();
+class Interpreter < Visitor {
+  init() {
+    this.DIGITS = Map();
+    for (var i = 0; i < 10; i = i + 1) {
+      this.DIGITS.set(str(i), true);
+    }
+  }
+
+  interpret(expression) {
+    var result = this.evaluate(expression);
+    if (result.ok) {
+      var value = result.value;
+      print(this.stringify(value));
+    } else {
+      LOX.runtimeError(result.value);
+    }
+  }
+
+  evaluate(expr) {
+    return expr.accept(this);
+  }
+
+  visitBinaryExpr(expr) {
+    var left = this.evaluate(expr.left);
+    if (!left.ok) return left;
+    var right = this.evaluate(expr.right);
+    if (!right.ok) return right;
+
+    // print("visitB " + str(expr.operator.type) + " " + str(left.value) + " " + str(right.value));
+
+    if (expr.operator.type == TT.BANG_EQUAL) {
+      return ok(!this.isEqual(left.value, right.value));
+    }
+    if (expr.operator.type == TT.EQUAL_EQUAL) {
+      return ok(this.isEqual(left.value, right.value));
+    }
+
+    if (expr.operator.type == TT.GREATER) {
+      var res = this.checkNumberOperands(expr.operator, left.value, right.value);
+      if (!res.ok) return res;
+      return ok(left.value > right.value);
+    }
+    if (expr.operator.type == TT.GREATER_EQUAL) {
+      var res = this.checkNumberOperands(expr.operator, left.value, right.value);
+      if (!res.ok) return res;
+      return ok(left.value >= right.value);
+    }
+    if (expr.operator.type == TT.LESS) {
+      var res = this.checkNumberOperands(expr.operator, left.value, right.value);
+      if (!res.ok) return res;
+      return ok(left.value < right.value);
+    }
+    if (expr.operator.type == TT.LESS_EQUAL) {
+      var res = this.checkNumberOperands(expr.operator, left.value, right.value);
+      if (!res.ok) return res;
+      return ok(left.value <= right.value);
+    }
+
+    if (expr.operator.type == TT.MINUS) {
+      var res = this.checkNumberOperands(expr.operator, left.value, right.value);
+      if (!res.ok) return res;
+      return ok(left.value - right.value);
+    }
+    if (expr.operator.type == TT.SLASH) {
+      var res = this.checkNumberOperands(expr.operator, left.value, right.value);
+      if (!res.ok) return res;
+      return ok(left.value / right.value);
+    }
+    if (expr.operator.type == TT.STAR) {
+      var res = this.checkNumberOperands(expr.operator, left.value, right.value);
+      if (!res.ok) return res;
+      return ok(left.value * right.value);
+    }
+    if (expr.operator.type == TT.PLUS) {
+      if (this.isNumber(left.value) and this.isNumber(right.value)) {
+        return ok(left.value + right.value);
+      }
+      if (this.isString(left.value) and this.isString(right.value)) {
+        return ok(left.value + right.value);
+      }
+      return err(RuntimeError(expr.operator, "Operands must be two numbers or two strings."));
+    }
+    // Unreachable.
+    return err(nil);
+  }
+
+  visitGroupingExpr(expr) {
+    return this.evaluate(expr.expression);
+  }
+
+  visitLiteralExpr(expr) {
+    return ok(expr.value);
+  }
+
+  visitUnaryExpr(expr) {
+    var right = this.evaluate(expr.right);
+    if (!right.ok) return right;
+    if (expr.operator.type == TT.BANG) return ok(!this.isTruthy(right.value));
+    if (expr.operator.type == TT.MINUS) {
+      var res = this.checkNumberOperand(expr.operator, right.value);
+      if (!res.ok) return res;
+      return ok(-right.value);
+    }
+
+    // Unreachable.
+    return err(nil);
+  }
+
+  checkNumberOperand(operator, operand) {
+    if (this.isNumber(operand)) return ok(nil);
+    return err(RuntimeError(operator, "Operand must be a number."));
+  }
+
+  checkNumberOperands(operator, left, right) {
+    if (this.isNumber(left) and this.isNumber(right)) return ok(nil);
+    return err(RuntimeError(operator, "Operands must be numbers."));
+  }
+
+  isString(value) {
+    return value == str(value);
+  }
+
+  isNumber(value) {
+    var potential = str(value);
+    var seenDot = false;
+    var seenDigit = false;
+    for (var i = 0; i < strlen(potential); i = i + 1) {
+      var digit = substr(potential, i, i + 1);
+      if (!(digit == "-" and i == 0)) {
+        if (digit == ".") {
+          if (seenDot) return false;
+          seenDot = true;
+        } else {
+          var isDigit = !!this.DIGITS.get(digit);
+          if (!isDigit) return false;
+          seenDigit = true;
+        }
+      }
+    }
+    return seenDigit;
+  }
+
+  isTruthy(object) {
+    if (nil == object) return false;
+    if (false == object) return false;
+    return true;
+  }
+
+  isEqual(a, b) {
+    if (nil == a and nil == b) return true;
+    if (nil == a) return false;
+    return a == b;
+  }
+
+  stringify(object) {
+    if (nil == object) return "nil";
+    if (this.isNumber(object)) {
+      return str(object);
+    }
+    return str(object);
+  }
+}
+
+var INTERPRETER = Interpreter();
 
 fun run(source) {
   var scanner = Scanner(source);
   var tokens = scanner.scanTokens();
-  for (var i = 0; i < tokens.size(); i = i + 1) {
-    print(tokens.get(i).toString());
-  }
+  var parser = Parser(tokens);
+  var expression = parser.parse();
+
+  if (LOX.hadError) return;
+
+  INTERPRETER.interpret(expression);
+
+  // for (var i = 0; i < tokens.size(); i = i + 1) {
+  //   print(tokens.get(i).toString());
+  // }
 }
 
 fun runFile(filename) {
   var source = readfile(filename);
   run(source);
+
+  if (LOX.hadError) process_exit(65);
+  if (LOX.hadRuntimeError) process_exit(70);
 }
 
 {

@@ -1,0 +1,99 @@
+// begin utils
+
+class Object { }
+
+class List {
+  init() {
+    this._items = Object();
+    this._count = 0;
+  }
+  add(item) {
+    this._items.(this._count) = item;
+    this._count = this._count + 1;
+  }
+  get(i) { return this._items.(i); }
+  size() { return this._count; }
+  forEach(callback) { for (var i = 0; i < this._count; i = i + 1) callback(this._items.(i)); }
+}
+
+fun split(hay, needle) {
+  var needleLen = strlen(needle);
+  var len = strlen(hay);
+  var result = Object();
+  var start = 0;
+  var end = 0;
+  var count = 0;
+  for (var i = 0; i < len - needleLen + 1; i = i + 1) {
+    var potential = substr(hay, i, i + needleLen);
+    if (potential == needle) {
+      result.(count) = substr(hay, start, end);
+      start = end + needleLen;
+      end = start;
+      i = i + needleLen - 1;
+      count = count + 1;
+    } else {
+      end = end + 1;
+    }
+  }
+  result.(count) = substr(hay, start, len);
+  result.len = count + 1;
+  return result;
+}
+
+// end utils
+
+fun defineType(className, fields) {
+  print("class " + className + " {");
+  // constructor
+  print("  init(" + fields + ") {");
+  var fieldlist = split(fields, ", ");
+  for (var i = 0; i < fieldlist.len; i = i + 1) {
+    print("    this." + fieldlist.(i) + " = " + fieldlist.(i) + ";");
+  }
+  print("  }");
+  // accept fn
+  print("  accept(visitor) {\n    return visitor.visit" + className + "Expr(this);\n  }");  
+
+  print("  getClassName() {\n    return \"" + className + "\";\n  }");
+  print("}");
+}
+
+fun defineAst(baseName, types) {
+  print("class " + baseName + " {
+  accept(visitor) {
+    print(\"Not implemented!\");
+  }
+}");
+  fun printType(type) {
+    var parts = split(type, " : ");
+    defineType(parts.(0), parts.(1));
+  }
+  types.forEach(printType);
+}
+
+fun defineVisitor(exprTypes, stmtTypes) {
+  print("class Visitor {");
+  fun printExpr(type) {
+    var parts = split(type, " : ");
+    var name = "visit" + parts.(0) + "Expr";
+    print("  " + name + "(expr) { print(\"" + name + " not implemented! \" + str(this)); }");
+  }
+  exprTypes.forEach(printExpr);
+  print("}");
+}
+
+{
+  // Usage: deno run --allow-read lox.ts generate_ast.lox
+
+  var exprTypes = List();
+  exprTypes.add("Binary : left, operator, right");
+  exprTypes.add("Grouping : expression");
+  exprTypes.add("Literal : value");
+  exprTypes.add("Unary : operator, right");
+
+  print("// begin ast");
+  defineAst("Expr", exprTypes);
+
+  defineVisitor(exprTypes, exprTypes);
+  print("// end ast");
+}
