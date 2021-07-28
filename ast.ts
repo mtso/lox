@@ -17,6 +17,7 @@ export module expr {
     visitSuperExpr: (exp: Super) => T;
     visitThisExpr: (exp: This) => T;
     visitGroupingExpr: (exp: Grouping) => T;
+    visitLambdaExpr: (exp: Lambda) => T;
     visitLiteralExpr: (exp: Literal) => T;
     visitLogicalExpr: (exp: Logical) => T;
     visitUnaryExpr: (exp: Unary) => T;
@@ -158,6 +159,21 @@ export module expr {
     }
     accept<T>(visitor: Visitor<T>): T {
       return visitor.visitGroupingExpr(this);
+    }
+  }
+  export class Lambda extends Expr {
+    name: Token | null;
+    parameters: Token[];
+    body: stmt.Stmt[];
+
+    constructor(name: Token | null, parameters: Token[], body: stmt.Stmt[]) {
+      super();
+      this.name = name;
+      this.parameters = parameters;
+      this.body = body;
+    }
+    accept<T>(visitor: Visitor<T>): T {
+      return visitor.visitLambdaExpr(this);
     }
   }
   export class Literal extends Expr {

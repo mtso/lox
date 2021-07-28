@@ -428,7 +428,32 @@ class Parser {
       return new expr.Grouping(exp);
     }
 
+    if (this.match(TT.FUN)) {
+      return this.lambda("function");
+    }
+
     throw this.error(this.peek(), "Expect expression.");
+  }
+
+  private lambda(kind: string): expr.Lambda {
+    let name = null;
+    if (this.match(TT.IDENTIFIER)) {
+      name = this.previous();
+    }
+    this.consume(TT.LEFT_PAREN, `Expect '(' after ${kind} name.`);
+    const params: Token[] = [];
+    if (!this.check(TT.RIGHT_PAREN)) {
+      do {
+        if (params.length >= 255) {
+          this.error(this.peek(), "Can't have more than 255 parameters.");
+        }
+        params.push(this.consume(TT.IDENTIFIER, "Expect parameter name."));
+      } while (this.match(TT.COMMA));
+    }
+    this.consume(TT.RIGHT_PAREN, "Expect ')' after parameters.");
+    this.consume(TT.LEFT_BRACE, `Expect '{' before ${kind} body.`);
+    const body = this.block();
+    return new expr.Lambda(name, params, body);
   }
 
   private match(...types: TokenType[]): boolean {
@@ -623,6 +648,46 @@ class LoxFunction extends LoxCallable {
   }
 }
 
+class LoxLambda extends LoxCallable {
+  private declaration: expr.Lambda;
+  private closure: Environment;
+
+  constructor(
+    declaration: expr.Lambda,
+    closure: Environment,
+  ) {
+    super();
+    this.declaration = declaration;
+    this.closure = closure;
+  }
+  call(interpreter: Interpreter, args: any[]): any {
+    const environment = new Environment(this.closure);
+    for (let i = 0; i < this.declaration.parameters.length; i++) {
+      environment.define(this.declaration.parameters[i].lexeme, args[i]);
+    }
+    try {
+      interpreter.executeBlock(this.declaration.body, environment);
+    } catch (err) {
+      if (err instanceof Return) {
+        return (err as Return).value;
+      } else {
+        throw err;
+      }
+    }
+    return null;
+  }
+  arity(): number {
+    return this.declaration.parameters.length;
+  }
+  toString(): string {
+    if (null !== this.declaration.name) {
+      return `<lambda ${this.declaration.name.lexeme}>`;
+    } else {
+      return `<lambda>`;
+    }
+  }
+}
+
 enum ClassType {
   NONE,
   CLASS,
@@ -729,6 +794,18 @@ class Resolver implements expr.Visitor<void>, stmt.Visitor<void> {
     exp.accept(this);
   }
   resolveFunction(func: stmt.Function, typ: FunctionType) {
+    const enclosingFunction = this.currentFunction;
+    this.currentFunction = typ;
+    this.beginScope();
+    for (const param of func.parameters) {
+      this.declare(param);
+      this.define(param);
+    }
+    this.resolveStmts(func.body);
+    this.endScope();
+    this.currentFunction = enclosingFunction;
+  }
+  resolveLambda(func: expr.Lambda, typ: FunctionType) {
     const enclosingFunction = this.currentFunction;
     this.currentFunction = typ;
     this.beginScope();
@@ -874,6 +951,13 @@ class Resolver implements expr.Visitor<void>, stmt.Visitor<void> {
   }
   visitGroupingExpr(exp: expr.Grouping) {
     this.resolveExpr(exp.expression);
+  }
+  visitLambdaExpr(exp: expr.Lambda) {
+    if (null !== exp.name) {
+      this.declare(exp.name);
+      this.define(exp.name);
+    }
+    this.resolveLambda(exp, FunctionType.FUNCTION);
   }
   visitLiteralExpr(exp: expr.Literal) {}
   visitLogicalExpr(exp: expr.Logical) {
@@ -1246,7 +1330,7 @@ class Interpreter implements expr.Visitor<any>, stmt.Visitor<void> {
   }
 
   visitCallExpr(exp: expr.Call): any {
-    const callee = this.evaluate(exp.callee);
+    let callee = this.evaluate(exp.callee);
     const args: any[] = [];
     for (const arg of exp.args) {
       args.push(this.evaluate(arg));
@@ -1287,6 +1371,14 @@ class Interpreter implements expr.Visitor<any>, stmt.Visitor<void> {
 
   visitLiteralExpr(exp: expr.Literal): any {
     return exp.value;
+  }
+
+  visitLambdaExpr(exp: expr.Lambda) {
+    const func = new LoxLambda(exp, this.environment);
+    if (null !== exp.name) {
+      this.environment.define(exp.name.lexeme, func);
+    }
+    return func;
   }
 
   visitLogicalExpr(exp: expr.Logical): any {
@@ -1609,7 +1701,7 @@ class Scanner {
       ["\\\\", "\\"],
       ["\\n", "\n"],
       ["\\t", "\t"],
-      ["\\\"", "\""],
+      ['\\"', '"'],
     ]);
     this.addTokenLiteral(TT.STRING, value);
   }

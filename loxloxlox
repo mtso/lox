@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
 
 script_dir=$(dirname "$0")
+echo "CAUTION: WIP"
 deno run --quiet --allow-read ${script_dir}/lox.ts ${script_dir}/lox.lox -- ${script_dir}/lox.lox -- $@

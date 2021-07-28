@@ -1,0 +1,11 @@
+(fun() { print("hi"); })();
+
+var a;
+var printA = (
+  fun aPrinter() {
+    print a;
+  }
+);
+a = "6";
+printA();
+aPrinter();
