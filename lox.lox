@@ -111,6 +111,18 @@ class Call {
     return "Call";
   }
 }
+class Get {
+  init(object, name) {
+    this.object = object;
+    this.name = name;
+  }
+  accept(visitor) {
+    return visitor.visitGetExpr(this);
+  }
+  getClassName() {
+    return "Get";
+  }
+}
 class Grouping {
   init(expression) {
     this.expression = expression;
@@ -144,6 +156,30 @@ class Logical {
   }
   getClassName() {
     return "Logical";
+  }
+}
+class Set {
+  init(object, name, value) {
+    this.object = object;
+    this.name = name;
+    this.value = value;
+  }
+  accept(visitor) {
+    return visitor.visitSetExpr(this);
+  }
+  getClassName() {
+    return "Set";
+  }
+}
+class This {
+  init(keyword) {
+    this.keyword = keyword;
+  }
+  accept(visitor) {
+    return visitor.visitThisExpr(this);
+  }
+  getClassName() {
+    return "This";
   }
 }
 class Unary {
@@ -183,6 +219,18 @@ class Block {
   }
   getClassName() {
     return "Block";
+  }
+}
+class Class {
+  init(name, methods) {
+    this.name = name;
+    this.methods = methods;
+  }
+  accept(visitor) {
+    return visitor.visitClassStmt(this);
+  }
+  getClassName() {
+    return "Class";
   }
 }
 class Expression {
@@ -273,12 +321,16 @@ class Visitor {
   visitAssignExpr(expr) { print("visitAssignExpr not implemented! " + str(this)); }
   visitBinaryExpr(expr) { print("visitBinaryExpr not implemented! " + str(this)); }
   visitCallExpr(expr) { print("visitCallExpr not implemented! " + str(this)); }
+  visitGetExpr(expr) { print("visitGetExpr not implemented! " + str(this)); }
   visitGroupingExpr(expr) { print("visitGroupingExpr not implemented! " + str(this)); }
   visitLiteralExpr(expr) { print("visitLiteralExpr not implemented! " + str(this)); }
   visitLogicalExpr(expr) { print("visitLogicalExpr not implemented! " + str(this)); }
+  visitSetExpr(expr) { print("visitSetExpr not implemented! " + str(this)); }
+  visitThisExpr(expr) { print("visitThisExpr not implemented! " + str(this)); }
   visitUnaryExpr(expr) { print("visitUnaryExpr not implemented! " + str(this)); }
   visitVariableExpr(expr) { print("visitVariableExpr not implemented! " + str(this)); }
   visitBlockStmt(stmt) { print("visitBlockStmt not implemented! " + str(this)); }
+  visitClassStmt(stmt) { print("visitClassStmt not implemented! " + str(this)); }
   visitExpressionStmt(stmt) { print("visitExpressionStmt not implemented! " + str(this)); }
   visitIfStmt(stmt) { print("visitIfStmt not implemented! " + str(this)); }
   visitFunctionStmt(stmt) { print("visitFunctionStmt not implemented! " + str(this)); }
@@ -479,9 +531,16 @@ class LoxCallable {
 }
 
 class LoxFunction < LoxCallable {
-  init(declaration, closure) {
+  init(declaration, closure, isInitializer) {
     this.declaration = declaration;
     this.closure = closure;
+    this.isInitializer = isInitializer;
+  }
+
+  bind(instance) {
+    var environment = Environment(this.closure);
+    environment.define("this", instance);
+    return LoxFunction(this.declaration, environment, this.isInitializer);
   }
 
   call(interpreter, arguments) {
@@ -500,6 +559,8 @@ class LoxFunction < LoxCallable {
         return result;
       }
     }
+
+    if (this.isInitializer) return this.closure.getAt(0, "this");
     return ok(nil);
   }
 
@@ -509,6 +570,65 @@ class LoxFunction < LoxCallable {
 
   toString() {
     return "<fn " + this.declaration.name.lexeme + ">";
+  }
+}
+
+class LoxClass < LoxCallable {
+  init(name, methods) {
+    this.name = name;
+    this.methods = methods;
+  }
+
+  findMethod(name) {
+    if (this.methods.get(name) != nil) {
+      return this.methods.get(name);
+    }
+    return nil;
+  }
+
+  toString() {
+    return this.name;
+  }
+
+  call(interpreter, arguments) {
+    var instance = LoxInstance(this);
+    var initializer = this.findMethod("init");
+    if (nil != initializer) {
+      var result = initializer.bind(instance).call(interpreter, arguments);
+      if (!result.ok) return result;
+    }
+    return ok(instance);
+  }
+
+  arity() {
+    var initializer = this.findMethod("init");
+    if (nil != initializer) return initializer.arity();
+    return 0;
+  }
+}
+
+class LoxInstance {
+  init(klass) {
+    this.klass = klass;
+    this.fields = Map();
+  }
+
+  toString() {
+    return this.klass.name + " instance";
+  }
+
+  get(name) {
+    // FIXME: make Map handle nils as values.
+    if (this.fields.get(name.lexeme) != nil) {
+      return ok(this.fields.get(name.lexeme));
+    }
+    var method = this.klass.findMethod(name.lexeme);
+    if (nil != method) return ok(method.bind(this));
+    return err(RuntimeError(name, "Undefined property '" + name.lexeme + "'."));
+  }
+
+  set(name, value) {
+    this.fields.set(name.lexeme, value);
   }
 }
 
@@ -693,12 +813,7 @@ class Parser {
     var statements = List();
     while (!this.isAtEnd()) {
       var declaration = this.declaration();
-      if (declaration.ok) {
-        statements.add(declaration.value);
-      } else {
-        // Skip parse error.
-        // Assume LOX.hadError is set.
-      }
+      if (declaration.ok) statements.add(declaration.value);
     }
     return statements;
   }
@@ -708,6 +823,11 @@ class Parser {
   }
 
   declaration() {
+    if (this.match(TT.CLASS)) {
+      var classDec = this.classDeclaration();
+      if (classDec.ok) return classDec;
+      else return ok(this.synchronize());
+    }
     if (this.match(TT.FUN)) {
       var funDec = this.function("function");
       if (funDec.ok) return funDec;
@@ -721,6 +841,25 @@ class Parser {
     var stmt = this.statement();
     if (stmt.ok) return stmt;
     else return ok(this.synchronize());
+  }
+
+  classDeclaration() {
+    var name = this.consume(TT.IDENTIFIER, "Expect class name.");
+    if (!name.ok) return name;
+    name = name.value;
+    var result = this.consume(TT.LEFT_BRACE, "Expect '{' before class body.");
+    if (!result.ok) return result;
+
+    var methods = List();
+    while (!this.check(TT.RIGHT_BRACE) and !this.isAtEnd()) {
+      var func = this.function("method");
+      if (!func.ok) return func;
+      methods.add(func.value);
+    }
+
+    this.consume(TT.RIGHT_BRACE, "Expect '}' after class body.");
+
+    return ok(Class(name, methods));
   }
 
   statement() {
@@ -933,16 +1072,22 @@ class Parser {
   assignment() {
     var expr = this.orClause();
     if (!expr.ok) return expr;
+    expr = expr;
+
     if (this.match(TT.EQUAL))  {
       var equals = this.previous();
       var value = this.assignment();
       if (!value.ok) return value;
 
       if (expr.value.getClassName() == "Variable") {
-        var name = expr.value.name;
+        var name = expr.name;
         return ok(Assign(name, value.value));
       } else {
-        this.error(equals, "Invalid assignment target.");
+        if (str(expr.value) == "Get instance") {
+          return ok(Set(expr.value.object, expr.value.name, value.value));
+        } else {
+          this.error(equals, "Invalid assignment target.");
+        }
       }
     }
     return expr;
@@ -1069,13 +1214,30 @@ class Parser {
     if (!expr.ok) return expr;
     expr = expr.value;
 
-    while (this.match(TT.LEFT_PAREN)) {
-      var result = this.finishCall(expr);
-      if (!result.ok) return result;
-      expr = result.value;
+    while (true) {
+      if (this.match(TT.LEFT_PAREN)) {
+        var result = this.finishCall(expr);
+        if (!result.ok) return result;
+        expr = result.value;
+      } else {
+        if (this.match(TT.DOT)) {
+          var name = this.consume(TT.IDENTIFIER, "Expect property name after '.'.");
+          if (!name.ok) return name;
+          expr = Get(expr, name.value);
+
+        } else {
+          return ok(expr);
+        }
+      }
     }
 
-    return ok(expr);
+    // while (this.match(TT.LEFT_PAREN)) {
+    //   var result = this.finishCall(expr);
+    //   if (!result.ok) return result;
+    //   expr = result.value;
+    // }
+
+    // return ok(expr);
   }
 
   primary() {
@@ -1083,6 +1245,7 @@ class Parser {
     if (this.match(TT.TRUE)) return ok(Literal(true));
     if (this.match(TT.NIL)) return ok(Literal(nil));
     if (this.match(TT.NUMBER) or this.match(TT.STRING)) return ok(Literal(this.previous().literal));
+    if (this.match(TT.THIS)) return ok(This(this.previous()));
     if (this.match(TT.IDENTIFIER)) return ok(Variable(this.previous()));
     if (this.match(TT.LEFT_PAREN)) {
       var expr = this.expression();
@@ -1156,18 +1319,46 @@ class Parser {
 var FunctionType = Object();
 FunctionType.NONE = "NONE";
 FunctionType.FUNCTION = "FUNCTION";
+FunctionType.INITIALIZER = "INITIALIZER";
+FunctionType.METHOD = "METHOD";
+
+var ClassType = Object();
+ClassType.NONE = "NONE";
+ClassType.CLASS = "CLASS";
 
 class Resolver < Visitor {
   init(interpreter) {
     this.interpreter = interpreter;
     this.scopes = List();
     this.currentFunction = FunctionType.NONE;
+    this.currentClass = ClassType.NONE;
   }
 
   visitBlockStmt(stmt) {
     this.beginScope();
     this.resolveStmts(stmt.statements);
     this.endScope();
+  }
+
+  visitClassStmt(stmt) {
+    var enclosingClass = this.currentClass;
+    this.currentClass = ClassType.CLASS;
+
+    this.declare(stmt.name);
+    this.define(stmt.name);
+
+    this.beginScope();
+    this.scopes.peek().set("this", true);
+
+    for (var i = 0; i < stmt.methods.size(); i = i + 1) {
+      var method = stmt.methods.get(i);
+      var declaration = FunctionType.METHOD;
+      if (method.name.lexeme == "init") declaration = FunctionType.INITIALIZER;
+      this.resolveFunction(method, declaration);
+    }
+
+    this.endScope();
+    this.currentClass = enclosingClass;
   }
 
   visitExpressionStmt(stmt) {
@@ -1192,9 +1383,14 @@ class Resolver < Visitor {
 
   visitReturnStmt(stmt) {
     if (this.currentFunction == FunctionType.NONE)
-      LOX.error(stmt.keyword, "Can't return from top-level code.");
+      LOX.errorToken(stmt.keyword, "Can't return from top-level code.");
 
-    if (nil != stmt.value) this.resolve(stmt.value);
+    if (nil != stmt.value) {
+      if (this.currentFunction == FunctionType.INITIALIZER) {
+        LOX.errorToken(stmt.keyword, "Can't return a value from an initializer.");
+      }
+      this.resolve(stmt.value);
+    }
   }
 
   visitVarStmt(stmt) {
@@ -1225,6 +1421,10 @@ class Resolver < Visitor {
     }
   }
 
+  visitGetExpr(expr) {
+    this.resolve(expr.object);
+  }
+
   visitGroupingExpr(expr) {
     this.resolve(expr.expression);
   }
@@ -1238,13 +1438,26 @@ class Resolver < Visitor {
     this.resolve(expr.right);
   }
 
+  visitSetExpr(expr) {
+    this.resolve(expr.value);
+    this.resolve(expr.object);
+  }
+
+  visitThisExpr(expr) {
+    if (ClassType.NONE == this.currentClass) {
+      LOX.errorToken(expr.keyword, "Can't use 'this' outside of a class.");
+      return;
+    }
+    this.resolveLocal(expr, expr.keyword);
+  }
+
   visitUnaryExpr(expr) {
     this.resolve(expr.right);
   }
 
   visitVariableExpr(expr) {
     if (!this.scopes.isEmpty() and this.scopes.peek().get(expr.name.lexeme) == false) {
-      LOX.error(expr.name, "Can't read local variable in its own initializer.");
+      LOX.errorToken(expr.name, "Can't read local variable in its own initializer.");
     }
     this.resolveLocal(expr, expr.name);
   }
@@ -1281,7 +1494,7 @@ class Resolver < Visitor {
   declare(name) {
     if (this.scopes.isEmpty()) return;
     var scope = this.scopes.peek();
-    if (nil != scope.get(name.lexeme)) LOX.error(name, "Already a variable with this name in this scope.");
+    if (nil != scope.get(name.lexeme)) LOX.errorToken(name, "Already a variable with this name in this scope.");
     scope.set(name.lexeme, false);
   }
 
@@ -1353,12 +1566,25 @@ class Interpreter < Visitor {
     return this.executeBlock(stmt.statements, Environment(this.environment));
   }
 
+  visitClassStmt(stmt) {
+    this.environment.define(stmt.name.lexeme, nil);
+    var methods = Map();
+    for (var i = 0; i < stmt.methods.size(); i = i + 1) {
+      var method = stmt.methods.get(i);
+      var function = LoxFunction(method, this.environment, method.name.lexeme == "init");
+      methods.set(method.name.lexeme, function);
+    }
+
+    var klass = LoxClass(stmt.name.lexeme, methods);
+    return this.environment.assign(stmt.name, klass);
+  }
+
   visitExpressionStmt(stmt) {
     return this.evaluate(stmt.expression);
   }
 
   visitFunctionStmt(stmt) {
-    var function = LoxFunction(stmt, this.environment);
+    var function = LoxFunction(stmt, this.environment, false);
     this.environment.define(stmt.name.lexeme, function);
     return ok(nil);
   }
@@ -1506,6 +1732,16 @@ class Interpreter < Visitor {
     return callee.call(this, arguments);
   }
 
+  visitGetExpr(expr) {
+    var object = this.evaluate(expr.object);
+    if (!object.ok) return object;
+    // FIXME type check
+    if (str(object.value) == "LoxInstance instance") {
+      return object.value.get(expr.name);
+    }
+    return err(RuntimeError(expr.name, "Only instances have properties."));
+  }
+
   visitGroupingExpr(expr) {
     return this.evaluate(expr.expression);
   }
@@ -1523,6 +1759,25 @@ class Interpreter < Visitor {
       if (!this.isTruthy(left.value)) return ok(left.value);
     }
     return this.evaluate(expr.right);
+  }
+
+  visitSetExpr(expr) {
+    var object = this.evaluate(expr.object);
+    if (!object.ok) return object;
+    object = object.value;
+
+    if (!(str(object) == "LoxInstance instance")) {
+      return err(RuntimeError(expr.name, "Only instances have fields."));
+    }
+
+    var value = this.evaluate(expr.value);
+    if (!value.ok) return value;
+    object.set(expr.name, value.value);
+    return value;
+  }
+
+  visitThisExpr(expr) {
+    return this.lookupVariable(expr.keyword, expr);
   }
 
   visitUnaryExpr(expr) {
