@@ -171,6 +171,18 @@ class Set {
     return "Set";
   }
 }
+class Super {
+  init(keyword, method) {
+    this.keyword = keyword;
+    this.method = method;
+  }
+  accept(visitor) {
+    return visitor.visitSuperExpr(this);
+  }
+  getClassName() {
+    return "Super";
+  }
+}
 class This {
   init(keyword) {
     this.keyword = keyword;
@@ -222,8 +234,9 @@ class Block {
   }
 }
 class Class {
-  init(name, methods) {
+  init(name, superclass, methods) {
     this.name = name;
+    this.superclass = superclass;
     this.methods = methods;
   }
   accept(visitor) {
@@ -326,6 +339,7 @@ class Visitor {
   visitLiteralExpr(expr) { print("visitLiteralExpr not implemented! " + str(this)); }
   visitLogicalExpr(expr) { print("visitLogicalExpr not implemented! " + str(this)); }
   visitSetExpr(expr) { print("visitSetExpr not implemented! " + str(this)); }
+  visitSuperExpr(expr) { print("visitSuperExpr not implemented! " + str(this)); }
   visitThisExpr(expr) { print("visitThisExpr not implemented! " + str(this)); }
   visitUnaryExpr(expr) { print("visitUnaryExpr not implemented! " + str(this)); }
   visitVariableExpr(expr) { print("visitVariableExpr not implemented! " + str(this)); }
@@ -574,14 +588,18 @@ class LoxFunction < LoxCallable {
 }
 
 class LoxClass < LoxCallable {
-  init(name, methods) {
+  init(name, superclass, methods) {
     this.name = name;
+    this.superclass = superclass;
     this.methods = methods;
   }
 
   findMethod(name) {
     if (this.methods.get(name) != nil) {
       return this.methods.get(name);
+    }
+    if (nil != this.superclass) {
+      return this.superclass.findMethod(name);
     }
     return nil;
   }
@@ -847,6 +865,12 @@ class Parser {
     var name = this.consume(TT.IDENTIFIER, "Expect class name.");
     if (!name.ok) return name;
     name = name.value;
+    var superclass = nil;
+    if (this.match(TT.LESS)) {
+      this.consume(TT.IDENTIFIER, "Expect superclass name.");
+      superclass = Variable(this.previous());
+    }
+
     var result = this.consume(TT.LEFT_BRACE, "Expect '{' before class body.");
     if (!result.ok) return result;
 
@@ -859,7 +883,7 @@ class Parser {
 
     this.consume(TT.RIGHT_BRACE, "Expect '}' after class body.");
 
-    return ok(Class(name, methods));
+    return ok(Class(name, superclass, methods));
   }
 
   statement() {
@@ -1245,6 +1269,14 @@ class Parser {
     if (this.match(TT.TRUE)) return ok(Literal(true));
     if (this.match(TT.NIL)) return ok(Literal(nil));
     if (this.match(TT.NUMBER) or this.match(TT.STRING)) return ok(Literal(this.previous().literal));
+    if (this.match(TT.SUPER)) {
+      var keyword = this.previous();
+      var result = this.consume(TT.DOT, "Expect '.' after 'super'.");
+      if (!result.ok) return;
+      var method = this.consume(TT.IDENTIFIER, "Expect super class method name.");
+      if (!method.ok) return;
+      return ok(Super(keyword, method.value));
+    }
     if (this.match(TT.THIS)) return ok(This(this.previous()));
     if (this.match(TT.IDENTIFIER)) return ok(Variable(this.previous()));
     if (this.match(TT.LEFT_PAREN)) {
@@ -1325,6 +1357,7 @@ FunctionType.METHOD = "METHOD";
 var ClassType = Object();
 ClassType.NONE = "NONE";
 ClassType.CLASS = "CLASS";
+ClassType.SUBCLASS = "SUBCLASS";
 
 class Resolver < Visitor {
   init(interpreter) {
@@ -1347,6 +1380,18 @@ class Resolver < Visitor {
     this.declare(stmt.name);
     this.define(stmt.name);
 
+    if (nil != stmt.superclass and stmt.name.lexeme == stmt.superclass.name.lexeme)
+        LOX.errorToken(stmt.superclass.name, "A class can't inherit from itself.");
+    if (nil != stmt.superclass) {
+      this.currentClass = ClassType.SUBCLASS;
+      this.resolve(stmt.superclass);
+    }
+
+    if (nil != stmt.superclass) {
+      this.beginScope();
+      this.scopes.peek().set("super", true);
+    }
+
     this.beginScope();
     this.scopes.peek().set("this", true);
 
@@ -1358,6 +1403,7 @@ class Resolver < Visitor {
     }
 
     this.endScope();
+    if (nil != stmt.superclass) this.endScope();
     this.currentClass = enclosingClass;
   }
 
@@ -1441,6 +1487,17 @@ class Resolver < Visitor {
   visitSetExpr(expr) {
     this.resolve(expr.value);
     this.resolve(expr.object);
+  }
+
+  visitSuperExpr(expr) {
+    if (ClassType.NONE == this.currentClass) {
+      LOX.errorToken(expr.keyword, "Can't use 'super' outside of a class.");
+    } else {
+      if (ClassType.SUBCLASS != this.currentClass) {
+        LOX.errorToken(expr.keyword, "Can't use 'super' in a class with no superclass.");
+      }
+    }
+    this.resolveLocal(expr, expr.keyword);
   }
 
   visitThisExpr(expr) {
@@ -1567,7 +1624,23 @@ class Interpreter < Visitor {
   }
 
   visitClassStmt(stmt) {
+    var superclass = nil;
+    if (nil != stmt.superclass) {
+      var value = this.evaluate(stmt.superclass);
+      if (!value.ok) return value;
+      superclass = value.value;
+      if (!(str(superclass) == "LoxClass instance")) {
+        return err(RuntimeError(stmt.superclass.name, "Superclass must be a class."));
+      }
+    }
+
     this.environment.define(stmt.name.lexeme, nil);
+
+    if (nil != stmt.superclass) {
+      this.environment = Environment(this.environment);
+      this.environment.define("super", superclass);
+    }
+
     var methods = Map();
     for (var i = 0; i < stmt.methods.size(); i = i + 1) {
       var method = stmt.methods.get(i);
@@ -1575,7 +1648,9 @@ class Interpreter < Visitor {
       methods.set(method.name.lexeme, function);
     }
 
-    var klass = LoxClass(stmt.name.lexeme, methods);
+    var klass = LoxClass(stmt.name.lexeme, superclass, methods);
+
+    if (nil != superclass) this.environment = this.environment.enclosing;
     return this.environment.assign(stmt.name, klass);
   }
 
@@ -1774,6 +1849,17 @@ class Interpreter < Visitor {
     if (!value.ok) return value;
     object.set(expr.name, value.value);
     return value;
+  }
+
+  visitSuperExpr(expr) {
+    var distance = this.locals.get(expr);
+    var superclass = this.environment.getAt(distance, "super");
+    if (!superclass.ok) return superclass;
+    var object = this.environment.getAt(distance - 1, "this");
+    if (!object.ok) return object;
+    var method = superclass.value.findMethod(expr.method.lexeme);
+    if (nil == method) return err(RuntimeError(expr.method, "Undefined property '" + expr.method.lexeme + "'."));
+    return method.bind(object.value);
   }
 
   visitThisExpr(expr) {
