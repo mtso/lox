@@ -1,0 +1,5 @@
+print("\""); // "
+print("hello\\nworld\\nwhat"); // hello\nworld\nwhat
+print("\\\\"); // \\
+print("\\n"); // \n
+print("\n"); // <newline>

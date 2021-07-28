@@ -1,0 +1,7 @@
+var args = process_args();
+for (var i = 0; i < args.count; i = i + 1) {
+  print(args.(i));
+}
+
+var file = readfile(args.(0));
+print(file);

@@ -1,0 +1,26 @@
+fun replaceAll(source, needle, with) {
+  var needleLen = strlen(needle);
+  var len = strlen(source);
+  var start = 0;
+  var end = 0;
+  var result = "";
+
+  for (var i = 0; i < len - needleLen + 1; i = i + 1) {
+    var potential = strslice(source, i, i + needleLen);
+    if (potential == needle) {
+      result = result + strslice(source, start, end) + with;
+      start = i + needleLen; // skip over found
+      end = start;
+      i = i + needleLen - 1;
+    } else {
+      end = end + 1;
+    }
+  }
+
+  result = result + strslice(source, start, len);
+
+  return result;
+}
+
+print(replaceAll("hello\\nworld\\nwhat", "\\n", "\n"));
+print(replaceAll("hello\\nworld\\nwhat", "\\n", "super"));

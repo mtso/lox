@@ -1560,6 +1560,32 @@ class Scanner {
     );
   }
 
+  private unescape(source: string, transforms: string[][]) {
+    const len = source.length;
+    let start = 0;
+    let end = 0;
+    let result = "";
+
+    for (var i = 0; i < len; i = i + 1) {
+      let replaced = false;
+      for (var j = 0; j < transforms.length; j++) {
+        const [from, to] = transforms[j];
+        const potential = source.substring(i, i + from.length);
+        if (potential === from) {
+          result = result + source.substring(start, end) + to;
+          start = i + from.length;
+          end = start;
+          i = i + from.length - 1;
+          replaced = true;
+          break;
+        }
+      }
+      if (!replaced) end = end + 1;
+    }
+
+    return result + source.substring(start, len);
+  }
+
   private string() {
     while (this.peek() != '"' && !this.isAtEnd()) {
       if (this.peek() == "\n") this.line++;
@@ -1577,11 +1603,14 @@ class Scanner {
 
     // Trim the surrounding quotes.
     let value = this.source.substring(this.start + 1, this.current - 1);
-    value = value.replaceAll("\\0", "\0");
-    value = value.replaceAll("\\r", "\r");
-    value = value.replaceAll("\\n", "\n");
-    value = value.replaceAll("\\t", "\t");
-    value = value.replaceAll(/\\(.)/g, "$1");
+    value = this.unescape(value, [
+      ["\\0", "\0"],
+      ["\\r", "\r"],
+      ["\\\\", "\\"],
+      ["\\n", "\n"],
+      ["\\t", "\t"],
+      ["\\\"", "\""],
+    ]);
     this.addTokenLiteral(TT.STRING, value);
   }
 

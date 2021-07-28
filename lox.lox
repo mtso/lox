@@ -65,6 +65,26 @@ fun split(hay, needle) {
   return result;
 }
 
+fun replaceAll(source, needle, with) {
+  var needleLen = strlen(needle);
+  var len = strlen(source);
+  var start = 0;
+  var end = 0;
+  var result = "";
+  for (var i = 0; i < len - needleLen + 1; i = i + 1) {
+    var potential = strslice(source, i, i + needleLen);
+    if (potential == needle) {
+      result = result + strslice(source, start, end) + with;
+      start = i + needleLen; // skip over found
+      end = start;
+      i = i + needleLen - 1;
+    } else {
+      end = end + 1;
+    }
+  }
+  return result + strslice(source, start, len);
+}
+
 // end utils
 
 // begin ast
@@ -123,6 +143,19 @@ class Get {
     return "Get";
   }
 }
+class GetDyn {
+  init(object, dot, name) {
+    this.object = object;
+    this.dot = dot;
+    this.name = name;
+  }
+  accept(visitor) {
+    return visitor.visitGetDynExpr(this);
+  }
+  getClassName() {
+    return "GetDyn";
+  }
+}
 class Grouping {
   init(expression) {
     this.expression = expression;
@@ -169,6 +202,20 @@ class Set {
   }
   getClassName() {
     return "Set";
+  }
+}
+class SetDyn {
+  init(object, dot, name, value) {
+    this.object = object;
+    this.dot = dot;
+    this.name = name;
+    this.value = value;
+  }
+  accept(visitor) {
+    return visitor.visitSetDynExpr(this);
+  }
+  getClassName() {
+    return "SetDyn";
   }
 }
 class Super {
@@ -335,10 +382,12 @@ class Visitor {
   visitBinaryExpr(expr) { print("visitBinaryExpr not implemented! " + str(this)); }
   visitCallExpr(expr) { print("visitCallExpr not implemented! " + str(this)); }
   visitGetExpr(expr) { print("visitGetExpr not implemented! " + str(this)); }
+  visitGetDynExpr(expr) { print("visitGetDynExpr not implemented! " + str(this)); }
   visitGroupingExpr(expr) { print("visitGroupingExpr not implemented! " + str(this)); }
   visitLiteralExpr(expr) { print("visitLiteralExpr not implemented! " + str(this)); }
   visitLogicalExpr(expr) { print("visitLogicalExpr not implemented! " + str(this)); }
   visitSetExpr(expr) { print("visitSetExpr not implemented! " + str(this)); }
+  visitSetDynExpr(expr) { print("visitSetDynExpr not implemented! " + str(this)); }
   visitSuperExpr(expr) { print("visitSuperExpr not implemented! " + str(this)); }
   visitThisExpr(expr) { print("visitThisExpr not implemented! " + str(this)); }
   visitUnaryExpr(expr) { print("visitUnaryExpr not implemented! " + str(this)); }
@@ -646,8 +695,19 @@ class LoxInstance {
     return err(RuntimeError(name, "Undefined property '" + name.lexeme + "'."));
   }
 
+  getDyn(name, dot) {
+    if (nil != this.fields.get(name)) return ok(this.fields.get(name));
+    var method = this.klass.findMethod(name);
+    if (nil != method) return ok(method.bind(this));
+    return ok(nil);
+  }
+
   set(name, value) {
     this.fields.set(name.lexeme, value);
+  }
+
+  setDyn(name, dot, value) {
+    this.fields.set(name, value);
   }
 }
 
@@ -753,14 +813,63 @@ class Scanner {
     this.addToken(type);
   }
 
+  unescape(source) {
+    class Pair {
+      init(a, b) {
+        this.(0) = a;
+        this.(1) = b;
+      }
+    }
+    var transforms = List();
+    transforms.add(Pair("\\0", "\0"));
+    transforms.add(Pair("\\r", "\r"));
+    transforms.add(Pair("\\\\", "\\"));
+    transforms.add(Pair("\\n", "\n"));
+    transforms.add(Pair("\\t", "\t"));
+    transforms.add(Pair("\\\"", "\""));
+
+    var len = strlen(source);
+    var start = 0;
+    var end = 0;
+    var result = "";
+
+    fun check(i) {
+      for (var j = 0; j < transforms.size(); j = j + 1) {
+        var transform = transforms.get(j);
+        var from = transform.(0);
+        var to = transform.(1);
+        var fromLen = strlen(from);
+        var potential = strslice(source, i, i + fromLen);
+        if (potential == from) {
+          result = result + strslice(source, start, end) + to;
+          start = i + fromLen;
+          end = start;
+          i = i + fromLen - 1;
+          return i;
+        }
+      }
+      return nil;
+    }
+
+    for (var i = 0; i < len; i = i + 1) {
+      var iNext = check(i);
+      if (iNext == nil) end = end + 1;
+      else i = iNext;
+    }
+
+    return result + strslice(source, start, len);
+  }
+
   string() {
     while (this.peek() != "\"" and !this.isAtEnd()) {
       if (this.peek() == "\n") this.line = this.line + 1;
+      if (this.peek() == "\\") this.advance();
       this.advance();
     }
     if (this.isAtEnd()) return LOX.error(this.line, "Unterminated string.");
     this.advance();
     var value = strslice(this.source, this.start + 1, this.current - 1);
+    value = this.unescape(value);
     this.addTokenLiteral(TT.STRING, value);
   }
 
@@ -1082,41 +1191,26 @@ class Parser {
     return ok(statements);
   }
 
-  blockStatement() {
-    // var statements = this.block();
-    // if (!statements.ok) 
-    var statements = List();
-    while (!this.check(TT.RIGHT_BRACE) and !this.isAtEnd()) {
-      var decl = this.declaration();
-      if (!decl.ok) return decl;
-      if (nil != decl.value) statements.add(decl.value);
-    }
-    var result = this.consume(TT.RIGHT_BRACE, "Expect '}' after block.");
-    if (!result.ok) return result;
-    return ok(Block(statements));
-  }
-
   assignment() {
     var expr = this.orClause();
     if (!expr.ok) return expr;
-    expr = expr;
 
     if (this.match(TT.EQUAL))  {
+      expr = expr.value;
       var equals = this.previous();
       var value = this.assignment();
       if (!value.ok) return value;
 
-      if (expr.value.getClassName() == "Variable") {
-        var name = expr.value.name;
+      if (expr.getClassName() == "Variable") {
+        var name = expr.name;
         return ok(Assign(name, value.value));
-      } else {
-        if (str(expr.value) == "Get instance") {
-          return ok(Set(expr.value.object, expr.value.name, value.value));
-        } else {
-          this.error(equals, "Invalid assignment target.");
-        }
       }
+
+      if (str(expr) == "Get instance") return ok(Set(expr.object, expr.name, value.value));
+      if (str(expr) == "GetDyn instance") return ok(SetDyn(expr.object, expr.dot, expr.name, value.value));
+      return err(this.error(equals, "Invalid assignment target."));
     }
+
     return expr;
   }
 
@@ -1248,10 +1342,18 @@ class Parser {
         expr = result.value;
       } else {
         if (this.match(TT.DOT)) {
-          var name = this.consume(TT.IDENTIFIER, "Expect property name after '.'.");
-          if (!name.ok) return name;
-          expr = Get(expr, name.value);
-
+          if (this.match(TT.LEFT_PAREN)) {
+            var dot = this.previous();
+            var name = this.expression();
+            if (!name.ok) return name;
+            var result = this.consume(TT.RIGHT_PAREN, "Expect ')' after expression.");
+            if (!result.ok) return result;
+            expr = GetDyn(expr, dot, name.value);
+          } else {
+            var name = this.consume(TT.IDENTIFIER, "Expect property name after '.'.");
+            if (!name.ok) return name;
+            expr = Get(expr, name.value);
+          }
         } else {
           return ok(expr);
         }
@@ -1466,6 +1568,11 @@ class Resolver < Visitor {
     this.resolve(expr.object);
   }
 
+  visitGetDynExpr(expr) {
+    this.resolve(expr.object);
+    this.resolve(expr.name);
+  }
+
   visitGroupingExpr(expr) {
     this.resolve(expr.expression);
   }
@@ -1481,6 +1588,12 @@ class Resolver < Visitor {
 
   visitSetExpr(expr) {
     this.resolve(expr.value);
+    this.resolve(expr.object);
+  }
+
+  visitSetDynExpr(expr) {
+    this.resolve(expr.value);
+    this.resolve(expr.name);
     this.resolve(expr.object);
   }
 
@@ -1573,12 +1686,65 @@ class Interpreter < Visitor {
     this.environment = this.globals;
     this.locals = Map();
 
-    class RtClock < LoxCallable {
-      arity() { return 0; }
-      call(interpreter, arguments) { return clock(); }
+    class RtBase < LoxCallable {
       toString() { return "<native fn>"; }
     }
+    class Builtin0 < RtBase {
+      init(builtin) { this.builtin = builtin; }
+      arity() { return 0; }
+      call(interpreter, arguments) { return ok(this.builtin()); }
+    }
+    class Builtin1 < RtBase {
+      init(builtin) { this.builtin = builtin; }
+      arity() { return 1; }
+      call(interpreter, arguments) { return ok(this.builtin(arguments.get(0))); }
+    }
+    class Builtin3 < RtBase {
+      init(builtin) { this.builtin = builtin; }
+      arity() { return 3; }
+      call(interpreter, arguments) { return ok(this.builtin(arguments.get(0), arguments.get(1), arguments.get(2))); }
+    }
+    class RtClock < Builtin0 { init() { super.init(clock); } }
+    class RtStr < Builtin1 { init() { super.init(str); } }
+    class RtStrlen < Builtin1 { init() { super.init(strlen); } }
+    class RtStrslice < Builtin3 { init() { super.init(strslice); } }
+    class RtParseFloat < Builtin1 { init() { super.init(parse_float); } }
+    class RtReadfile < Builtin1 { init() { super.init(readfile); } }
+    class RtProcessExit < Builtin1 { init() { super.init(process_exit); } }
+    class RtEprint < Builtin1 { init() { super.init(eprint); } }
+
+    class RtProcessArgs < RtBase {
+      arity() { return 0; }
+      call(interpreter, arguments) {
+        fun max(a, b) {
+          if (a > b) return a; else return b;
+        }
+        // Assume the lox.ts script was run like:
+        // deno run --allow-read lox.ts lox.lox -- arg0 arg1 arg2
+        // Skip past lox.lox filename and "--" separator.
+        var args = process_args();
+        var containerClass = LoxClass("RtArgContainer", nil, Map());
+        var container = LoxInstance(containerClass);
+
+        for (var i = 2; i < args.count; i = i + 1) {
+          container.setDyn(i - 2, Token(TT.NUMBER, str(i), i, 0), args.(i));
+        }
+        container.set(
+          Token(TT.STRING, "count", "count", 0),
+          max(args.count - 2, 0)
+        );
+        return ok(container);
+      }
+    }
     this.globals.define("clock", RtClock());
+    this.globals.define("str", RtStr());
+    this.globals.define("strlen", RtStrlen());
+    this.globals.define("strslice", RtStrslice());
+    this.globals.define("parse_float", RtParseFloat());
+    this.globals.define("readfile", RtReadfile());
+    this.globals.define("process_args", RtProcessArgs());
+    this.globals.define("process_exit", RtProcessExit());
+    this.globals.define("eprint", RtEprint());
   }
 
   interpret(statements) {
@@ -1817,6 +1983,18 @@ class Interpreter < Visitor {
     return err(RuntimeError(expr.name, "Only instances have properties."));
   }
 
+  visitGetDynExpr(expr) {
+    var object = this.evaluate(expr.object);
+    if (!object.ok) return object;
+    // FIXME type check
+    if (str(object.value) == "LoxInstance instance") {
+      var name = this.evaluate(expr.name);
+      if (!name.ok) return name;
+      return object.value.getDyn(name.value, expr.dot);
+    }
+    return err(RuntimeError(expr.name, "Only instances have properties."));
+  }
+
   visitGroupingExpr(expr) {
     return this.evaluate(expr.expression);
   }
@@ -1848,6 +2026,25 @@ class Interpreter < Visitor {
     var value = this.evaluate(expr.value);
     if (!value.ok) return value;
     object.set(expr.name, value.value);
+    return value;
+  }
+
+  visitSetDynExpr(expr) {
+    var object = this.evaluate(expr.object);
+    if (!object.ok) return object;
+    object = object.value;
+
+    if (!(str(object) == "LoxInstance instance")) {
+      return err(RuntimeError(expr.name, "Only instances have fields."));
+    }
+
+    var name = this.evaluate(expr.name);
+    if (!name.ok) return name;
+    name = name.value;
+
+    var value = this.evaluate(expr.value);
+    if (!value.ok) return value;
+    object.setDyn(name, expr.dot, value.value);
     return value;
   }
 
@@ -1981,9 +2178,14 @@ fun runFile(filename) {
 
 {
   var args = process_args();
-  if (args.count > 1) {
-    print("Usage: loxlox [script]");
-  } else if (args.count == 1) {
+  // Omit usage print for chaining and 
+  // exposing other command line arguments.
+  // if (args.count > 1) {
+  //   print("Usage: loxlox [script]");
+  // } else if (args.count == 1) {
+  //   runFile(args.(0));
+
+  if (args.count > 0) {
     runFile(args.(0));
   } else {
     print("Prompt not implemented.");
