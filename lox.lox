@@ -568,6 +568,7 @@ class LoxFunction < LoxCallable {
     if (!result.ok) {
       var error = result.value;
       if (error.code == "ReturnState") {
+        if (this.isInitializer) return this.closure.getAt(0, "this");
         return ok(error.value);
       } else {
         return result;
@@ -741,7 +742,6 @@ class Scanner {
     if (this.isDigit(c)) return this.number();
     if (this.isAlpha(c)) return this.identifier();
     LOX.error(this.line, "Unexpected character.");
-    print(c);
   }
 
   identifier() {
@@ -867,7 +867,8 @@ class Parser {
     name = name.value;
     var superclass = nil;
     if (this.match(TT.LESS)) {
-      this.consume(TT.IDENTIFIER, "Expect superclass name.");
+      var result = this.consume(TT.IDENTIFIER, "Expect superclass name.");
+      if (!result.ok) return result;
       superclass = Variable(this.previous());
     }
 
@@ -1049,7 +1050,9 @@ class Parser {
       parameters.add(name.value);
 
       while (this.match(TT.COMMA)) {
-        if (parameters.size() > 255) this.error(this.previous(), "Can't have more than 255 parameters.");
+        if (parameters.size() >= 255) {
+          this.error(this.peek(), "Can't have more than 255 parameters.");
+        }
 
         var name = this.consume(TT.IDENTIFIER, "Expect parameter name.");
         if (!name.ok) return name;
@@ -1104,7 +1107,7 @@ class Parser {
       if (!value.ok) return value;
 
       if (expr.value.getClassName() == "Variable") {
-        var name = expr.name;
+        var name = expr.value.name;
         return ok(Assign(name, value.value));
       } else {
         if (str(expr.value) == "Get instance") {
@@ -1220,7 +1223,7 @@ class Parser {
 
       while (this.match(TT.COMMA)) {
         if (arguments.size() >= 255) {
-          this.error(this.previous(), "Can't have more than 255 arguments.");
+          this.error(this.peek(), "Can't have more than 255 arguments.");
         }
         var expr = this.expression();
         if (!expr.ok) return expr;
@@ -1254,14 +1257,6 @@ class Parser {
         }
       }
     }
-
-    // while (this.match(TT.LEFT_PAREN)) {
-    //   var result = this.finishCall(expr);
-    //   if (!result.ok) return result;
-    //   expr = result.value;
-    // }
-
-    // return ok(expr);
   }
 
   primary() {
@@ -1272,9 +1267,9 @@ class Parser {
     if (this.match(TT.SUPER)) {
       var keyword = this.previous();
       var result = this.consume(TT.DOT, "Expect '.' after 'super'.");
-      if (!result.ok) return;
-      var method = this.consume(TT.IDENTIFIER, "Expect super class method name.");
-      if (!method.ok) return;
+      if (!result.ok) return result;
+      var method = this.consume(TT.IDENTIFIER, "Expect superclass method name.");
+      if (!method.ok) return method;
       return ok(Super(keyword, method.value));
     }
     if (this.match(TT.THIS)) return ok(This(this.previous()));
@@ -1802,7 +1797,12 @@ class Interpreter < Visitor {
       arguments.add(argument.value);
     }
 
-    if (callee.("isCallable") == nil) return err(RuntimeError(expr.paren, "Can only call functions and classes."));
+    if (!this.isInstance(callee) or callee.("isCallable") == nil) return err(RuntimeError(expr.paren, "Can only call functions and classes."));
+
+    if (arguments.size() != callee.arity())
+      return err(RuntimeError(expr.paren, "Expected " +
+        str(callee.arity()) + " arguments but got " +
+        str(arguments.size()) + "."));
 
     return callee.call(this, arguments);
   }
@@ -1859,7 +1859,7 @@ class Interpreter < Visitor {
     if (!object.ok) return object;
     var method = superclass.value.findMethod(expr.method.lexeme);
     if (nil == method) return err(RuntimeError(expr.method, "Undefined property '" + expr.method.lexeme + "'."));
-    return method.bind(object.value);
+    return ok(method.bind(object.value));
   }
 
   visitThisExpr(expr) {
@@ -1910,6 +1910,7 @@ class Interpreter < Visitor {
 
   isNumber(value) {
     var potential = str(value);
+    if (potential == value) return false;
     var seenDot = false;
     var seenDigit = false;
     for (var i = 0; i < strlen(potential); i = i + 1) {
@@ -1943,7 +1944,12 @@ class Interpreter < Visitor {
   stringify(object) {
     if (nil == object) return "nil";
     if (this.isNumber(object)) return str(object);
+    if (this.isInstance(object) and nil != object.("toString")) return object.toString();
     return str(object);
+  }
+
+  isInstance(object) {
+    return split(str(object), " ").(1) == "instance";
   }
 }
 
