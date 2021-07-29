@@ -1,3 +1,13 @@
+# Lox implementations
+
+This repo contains typescript and lox tree-walk interpreter implementations of lox (an educational programming language described in [*Crafting Interpreters*](https://craftinginterpreters.com/) by Bob Nystrom). There are a couple additional extensions to the base language.
+
+The extensions are intended to experiment with some additional language features. And the lox implementation makes heavy use of the dynamic property access extension to implement collections (List/Map). A purer lox implementation with vanilla lox was demonstrated in [https://github.com/benhoyt/loxlox]().
+
+Aside from the extensions and a couple omissions (REPL and AST Printer), both implementations follow the structure of the book, with: AST code generator, visitor pattern, etc. Parse and runtime errors in the lox implementation are bubbled up via a Result{ok,value} class to simulate raised exceptions.
+
+Though character escaping was added, the meta usage of running lox.lox with lox.lox is a work in progress.
+
 # Typescript implementation
 
 The typescript implementation expects the
@@ -104,9 +114,9 @@ Link to repo: (https://github.com/munificent/craftinginterpreters)[]
 The same builtins in the typescript implementation are made available in the lox
 implementation.
 
-## Meta Usage
+## Meta Usage (WIP)
 
-The string escaping is improved to allow running `lox.lox` with the lox
+The backslash escaping in Parser::string() supports running `lox.lox` with the lox
 implementation (`lox.lox` itself).
 
 The command to run lox with the lox implementation of lox:
@@ -115,6 +125,7 @@ The command to run lox with the lox implementation of lox:
 deno run --allow-read lox.ts lox.lox -- lox.lox -- <path to lox file>
 ```
 
-# Shortcuts
+# Limitations
 
 - The REPL prompt in the book is not implemented.
+- AST Printer class omitted in both implementations.

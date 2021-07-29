@@ -121,7 +121,6 @@ fun defineVisitor(exprTypes, stmtTypes) {
   print("// begin ast");
   defineAst("Expr", exprTypes);
   defineAst("Stmt", stmtTypes);
-
   defineVisitor(exprTypes, stmtTypes);
   print("// end ast");
 }
