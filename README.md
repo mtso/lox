@@ -2,7 +2,7 @@
 
 This repo contains typescript and lox tree-walk interpreter implementations of lox (an educational programming language described in [*Crafting Interpreters*](https://craftinginterpreters.com/) by Bob Nystrom). There are a couple additional extensions to the base language.
 
-The extensions are intended to experiment with some additional language features. And the lox implementation makes heavy use of the dynamic property access extension to implement collections (List/Map). A purer lox implementation with vanilla lox was demonstrated in [https://github.com/benhoyt/loxlox]().
+The extensions are intended to experiment with some additional language features. And the lox implementation makes heavy use of the dynamic property access extension to implement collections (List/Map). A purer lox implementation with vanilla lox was demonstrated in [https://github.com/benhoyt/loxlox](https://github.com/benhoyt/loxlox).
 
 Aside from the extensions and a couple omissions (REPL and AST Printer), both implementations follow the structure of the book, with: AST code generator, visitor pattern, etc. Parse and runtime errors in the lox implementation are bubbled up via a Result{ok,value} class to simulate raised exceptions.
 
@@ -80,7 +80,7 @@ With the official repo set up, run the following command:
 dart tool/bin/test.dart jlox --interpreter <path to repo>/tslox
 ```
 
-Link to repo: [https://github.com/munificent/craftinginterpreters]()
+Link to repo: [https://github.com/munificent/craftinginterpreters](https://github.com/munificent/craftinginterpreters)
 
 # Lox implementation
 
@@ -103,7 +103,7 @@ lox implementation of lox:
 dart tool/bin/test.dart jlox --interpreter <path to repo>/loxlox
 ```
 
-Link to repo: [https://github.com/munificent/craftinginterpreters]()
+Link to repo: [https://github.com/munificent/craftinginterpreters](https://github.com/munificent/craftinginterpreters)
 
 ## Extensions to base lox in lox implementation
 
