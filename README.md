@@ -80,7 +80,7 @@ With the official repo set up, run the following command:
 dart tool/bin/test.dart jlox --interpreter <path to repo>/tslox
 ```
 
-Link to repo: (https://github.com/munificent/craftinginterpreters)[]
+Link to repo: [https://github.com/munificent/craftinginterpreters]()
 
 # Lox implementation
 
@@ -103,7 +103,7 @@ lox implementation of lox:
 dart tool/bin/test.dart jlox --interpreter <path to repo>/loxlox
 ```
 
-Link to repo: (https://github.com/munificent/craftinginterpreters)[]
+Link to repo: [https://github.com/munificent/craftinginterpreters]()
 
 ## Extensions to base lox in lox implementation
 
